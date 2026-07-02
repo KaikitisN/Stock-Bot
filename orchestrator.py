@@ -17,7 +17,7 @@ os.makedirs(config.LOG_DIR, exist_ok=True)
 
 def log_row(path, row: dict):
     file_exists = os.path.isfile(path)
-    with open(path, "a", newline="") as f:
+    with open(path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
         if not file_exists:
             writer.writeheader()
@@ -40,8 +40,11 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
             qty = calc_position_size(equity, price, risk_cfg["max_position_pct"])
             if qty > 0:
                 stop_price, target_price = stop_loss_take_profit_prices(
-                    price, risk_cfg["stop_loss_pct"], risk_cfg["take_profit_pct"]
-                )
+                        price,
+                        risk_cfg["stop_loss_pct"],
+                        risk_cfg["take_profit_pct"],
+                        decision["action"],
+                    )
                 try:
                     order = submit_bracket_order(
                         trading_client, symbol, qty, decision["action"], stop_price, target_price

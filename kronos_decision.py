@@ -12,12 +12,38 @@ Prerequisites:
 import sys
 import os
 import pandas as pd
-import numpy as np
 
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 
 _predictor = None  # singleton — loaded once, reused every cycle
+
+
+def _get_timestamp_series(df: pd.DataFrame):
+    if isinstance(df.index, pd.DatetimeIndex):
+        return pd.Series(pd.to_datetime(df.index), index=df.index)
+
+    for column in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[column]):
+            return pd.to_datetime(df[column])
+
+    for column_name in ("timestamp", "timestamps", "datetime", "date", "time"):
+        if column_name in df.columns:
+            return pd.to_datetime(df[column_name])
+
+    return None
+
+
+def _make_future_timestamps(x_timestamp: pd.Series, pred_len: int):
+    x_timestamp = pd.to_datetime(pd.Index(x_timestamp))
+    if len(x_timestamp) < 2:
+        freq = pd.Timedelta(hours=1)
+    else:
+        delta = pd.Series(x_timestamp).diff().dropna().median()
+        freq = delta if pd.notna(delta) and delta > pd.Timedelta(0) else pd.Timedelta(hours=1)
+
+    start = x_timestamp[-1] + freq
+    return pd.Series(pd.date_range(start=start, periods=pred_len, freq=freq))
 
 
 def _get_predictor():
@@ -74,6 +100,16 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
         }
 
     input_df = bars_df[["open", "high", "low", "close", "volume"]].tail(200).copy()
+    x_timestamp = _get_timestamp_series(bars_df.tail(len(input_df)))
+
+    if x_timestamp is None:
+        return {
+            "symbol": symbol, "action": "HOLD", "confidence": 0,
+            "reason": "Kronos input is missing timestamps; expected a DatetimeIndex or a timestamp column.",
+            "provider": "Kronos (Local)",
+        }
+
+    y_timestamp = _make_future_timestamps(x_timestamp, pred_len=10)
 
     if len(input_df) < 60:
         return {
@@ -83,7 +119,16 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
         }
 
     try:
-        predictions = predictor.predict(input_df, pred_len=10, num_samples=50)
+        predictions = predictor.predict(
+            df=input_df,
+            x_timestamp=x_timestamp,
+            y_timestamp=y_timestamp,
+            pred_len=10,
+            T=1.0,
+            top_p=0.9,
+            sample_count=50,
+            verbose=False,
+        )
 
         last_close = float(input_df["close"].iloc[-1])
         median_forecast = float(predictions["close"].median())

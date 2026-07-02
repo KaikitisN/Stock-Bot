@@ -15,6 +15,15 @@ from risk_manager import get_account_equity
 st.set_page_config(page_title="AI Trading Bot", layout="wide")
 st.title("AI Trading Bot Dashboard")
 
+
+def read_csv_with_fallback(path: str) -> pd.DataFrame:
+    for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(path, encoding="latin1")
+
 # ---- Sidebar controls ----
 st.sidebar.header("Bot Configuration")
 
@@ -74,7 +83,7 @@ if positions:
         "Current Price": p.current_price, "Unrealized P/L": p.unrealized_pl,
     } for p in positions])
     st.subheader("Open Positions")
-    st.dataframe(pos_df, use_container_width=True)
+    st.dataframe(pos_df, width="stretch")
 
 # ---- Run cycle ----
 def execute_cycle():
@@ -96,25 +105,25 @@ if auto_run:
 # ---- Latest decisions ----
 if "last_results" in st.session_state:
     st.subheader("Latest AI Decisions")
-    st.dataframe(pd.DataFrame(st.session_state["last_results"]), use_container_width=True)
+    st.dataframe(pd.DataFrame(st.session_state["last_results"]), width="stretch")
 
 # ---- History from logs ----
 st.subheader("Decision History")
 try:
-    hist = pd.read_csv(config.DECISIONS_LOG)
-    st.dataframe(hist.tail(50), use_container_width=True)
+    hist = read_csv_with_fallback(config.DECISIONS_LOG)
+    st.dataframe(hist.tail(50), width="stretch")
 except FileNotFoundError:
     st.info("No decisions logged yet - run a cycle to generate history.")
 
 st.subheader("Trade History")
 try:
-    trades = pd.read_csv(config.TRADES_LOG)
-    st.dataframe(trades, use_container_width=True)
+    trades = read_csv_with_fallback(config.TRADES_LOG)
+    st.dataframe(trades, width="stretch")
     if not trades.empty:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=trades["timestamp"], y=trades["entry_price"],
                                  mode="markers+lines", name="Entry Price"))
         fig.update_layout(title="Trade Entries Over Time", xaxis_title="Time", yaxis_title="Price")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 except FileNotFoundError:
     st.info("No trades executed yet.")

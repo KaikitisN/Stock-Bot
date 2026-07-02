@@ -8,6 +8,9 @@ Supports **local AI inference via Kronos** (free, no API key) and cloud provider
 
 ## Quick Start
 
+Python compatibility: use Python 3.11 or 3.12 for best support.
+Python 3.14 can fail on scientific/ML wheels (torch/numpy/matplotlib builds).
+
 ```bash
 # 1. Clone this repo
 git clone https://github.com/KaikitisN/Stock-Bot.git
@@ -30,6 +33,23 @@ cp .env.example .env
 
 # 6. Launch dashboard
 streamlit run dashboard.py
+```
+
+### Windows recovery (if `pip` breaks in venv)
+
+```bash
+# From project root (parent folder containing .venv)
+python -m ensurepip --upgrade
+python -m pip install --upgrade pip setuptools wheel
+```
+
+If you still get build/metadata errors, recreate venv with Python 3.12 and reinstall:
+
+```bash
+# Example path from python.org installer
+C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 ---

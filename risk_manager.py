@@ -28,7 +28,12 @@ def check_daily_loss_limit(trading_client, day_start_equity, max_daily_loss_pct)
     return drawdown_pct >= max_daily_loss_pct
 
 
-def stop_loss_take_profit_prices(entry_price, stop_loss_pct, take_profit_pct):
-    stop_price = round(entry_price * (1 - stop_loss_pct / 100), 2)
-    target_price = round(entry_price * (1 + take_profit_pct / 100), 2)
+def stop_loss_take_profit_prices(entry_price, stop_loss_pct, take_profit_pct, side="BUY"):
+    side = side.upper()
+    if side == "SELL":
+        stop_price = round(entry_price * (1 + stop_loss_pct / 100), 2)
+        target_price = round(entry_price * (1 - take_profit_pct / 100), 2)
+    else:
+        stop_price = round(entry_price * (1 - stop_loss_pct / 100), 2)
+        target_price = round(entry_price * (1 + take_profit_pct / 100), 2)
     return stop_price, target_price
