@@ -1,8 +1,23 @@
+# Broker & market data
 alpaca-py>=0.33.0
+
+# AI providers (cloud)
 litellm>=1.55.0
+requests>=2.32.0
+
+# Dashboard
 streamlit>=1.40.0
+plotly>=5.24.0
+
+# Utilities
 python-dotenv>=1.0.1
 pandas>=2.2.0
-plotly>=5.24.0
 apscheduler>=3.10.4
-requests>=2.32.0
+
+# Kronos local model dependencies
+# (also run: pip install -r ../Kronos/requirements.txt after cloning the repo)
+torch>=2.2.0
+huggingface_hub>=0.23.0
+transformers>=4.40.0
+einops>=0.7.0
+numpy>=1.26.0

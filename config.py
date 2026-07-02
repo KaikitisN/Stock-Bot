@@ -1,5 +1,5 @@
 """
-Central configuration. Values here are defaults - the Streamlit dashboard
+Central configuration. Values here are defaults — the Streamlit dashboard
 lets you override AI_PROVIDER, RUN_INTERVAL_MINUTES, USE_NEWS and risk %
 at runtime without editing this file.
 """
@@ -13,17 +13,25 @@ ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
 ALPACA_PAPER = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
-# --- AI provider selection (swappable via LiteLLM) ---
+# --- AI provider selection ---
+# "kronos_local" is handled separately in kronos_decision.py (no API key needed).
+# All other values are LiteLLM model strings.
 AI_PROVIDERS = {
-    "Perplexity Sonar":      "perplexity/sonar",
-    "Perplexity Sonar Pro":  "perplexity/sonar-pro",
-    "OpenAI GPT-4o":         "gpt-4o",
-    "OpenAI GPT-4o-mini":    "gpt-4o-mini",
-    "Claude 3.5 Sonnet":     "claude-3-5-sonnet-20241022",
+    "Kronos (Local)": "kronos_local",          # runs on your machine, free
+    "Perplexity Sonar": "perplexity/sonar",
+    "Perplexity Sonar Pro": "perplexity/sonar-pro",
+    "OpenAI GPT-4o": "gpt-4o",
+    "OpenAI GPT-4o-mini": "gpt-4o-mini",
+    "Claude 3.5 Sonnet": "claude-3-5-sonnet-20241022",
 }
-DEFAULT_AI_PROVIDER = "Perplexity Sonar"
+DEFAULT_AI_PROVIDER = "Kronos (Local)"
 
-# --- News toggle ---
+# --- Kronos local model size ---
+# mini (~1 GB, CPU ok) | small (~2 GB) | base (~4 GB) | large (~8 GB GPU)
+KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
+KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
+
+# --- News toggle (Perplexity Sonar) ---
 USE_NEWS_DEFAULT = False
 
 # --- Trading frequency options (minutes) ---
