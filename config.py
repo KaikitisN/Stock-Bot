@@ -30,6 +30,8 @@ DEFAULT_AI_PROVIDER = "Kronos (Local)"
 # mini (~1 GB, CPU ok) | small (~2 GB) | base (~4 GB) | large (~8 GB GPU)
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
+# Minimum forecast move required before Kronos turns a prediction into BUY/SELL.
+KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "1.0"))
 
 # --- News toggle (Perplexity Sonar) ---
 USE_NEWS_DEFAULT = False

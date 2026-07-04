@@ -136,10 +136,12 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
         p90 = float(predictions["close"].quantile(0.90))   # bullish scenario
         pct_change = (median_forecast - last_close) / last_close * 100
 
-        if pct_change > 1.5:
+        signal_threshold = getattr(config, "KRONOS_SIGNAL_THRESHOLD_PCT", 1.0)
+
+        if pct_change > signal_threshold:
             action = "BUY"
             confidence = min(int(50 + pct_change * 10), 95)
-        elif pct_change < -1.5:
+        elif pct_change < -signal_threshold:
             action = "SELL"
             confidence = min(int(50 + abs(pct_change) * 10), 95)
         else:
@@ -153,6 +155,7 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "reason": (
                 f"Kronos ({KRONOS_MODEL_SIZE}) forecasts close at "
                 f"${median_forecast:.2f} (now: ${last_close:.2f}, {pct_change:+.2f}%). "
+                f"Signal threshold: {signal_threshold:.2f}%. "
                 f"80% range: ${p10:.2f}\u2013${p90:.2f}"
             ),
             "provider": f"Kronos (Local / {KRONOS_MODEL_SIZE})",
