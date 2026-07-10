@@ -1,25 +1,64 @@
-"""Pulls recent price bars from Alpaca for a list of symbols."""
+"""Pulls recent price bars from Alpaca for a list of symbols.
+Automatically routes crypto (e.g. BTC/USD) to CryptoHistoricalDataClient
+and stocks/ETFs to StockHistoricalDataClient.
+"""
 import pandas as pd
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from datetime import datetime, timedelta
 import config
 
 
-def get_client():
+def _is_crypto(symbol: str) -> bool:
+    """Return True if the symbol looks like a crypto pair (contains '/')."""
+    return "/" in symbol
+
+
+def _split_symbols(symbols):
+    """Split a list of symbols into (crypto_list, stock_list)."""
+    crypto = [s for s in symbols if _is_crypto(s)]
+    stocks = [s for s in symbols if not _is_crypto(s)]
+    return crypto, stocks
+
+
+def _get_stock_client():
     return StockHistoricalDataClient(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY)
 
 
+def _get_crypto_client():
+    return CryptoHistoricalDataClient(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY)
+
+
 def fetch_bars(symbols, lookback_days=10, timeframe=TimeFrame.Hour):
-    client = get_client()
-    req = StockBarsRequest(
-        symbol_or_symbols=symbols,
-        timeframe=timeframe,
-        start=datetime.utcnow() - timedelta(days=lookback_days),
-    )
-    bars = client.get_stock_bars(req).df
-    return bars
+    """Fetch OHLCV bars for a mixed list of stock and crypto symbols.
+    Returns a combined DataFrame indexed by (symbol, timestamp).
+    """
+    crypto_syms, stock_syms = _split_symbols(symbols)
+    frames = []
+
+    if stock_syms:
+        client = _get_stock_client()
+        req = StockBarsRequest(
+            symbol_or_symbols=stock_syms,
+            timeframe=timeframe,
+            start=datetime.utcnow() - timedelta(days=lookback_days),
+        )
+        frames.append(client.get_stock_bars(req).df)
+
+    if crypto_syms:
+        client = _get_crypto_client()
+        req = CryptoBarsRequest(
+            symbol_or_symbols=crypto_syms,
+            timeframe=timeframe,
+            start=datetime.utcnow() - timedelta(days=lookback_days),
+        )
+        frames.append(client.get_crypto_bars(req).df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    return pd.concat(frames)
 
 
 def compute_indicators(df):
