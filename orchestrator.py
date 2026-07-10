@@ -37,18 +37,31 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
 
         if decision["action"] in ("BUY", "SELL") and decision.get("confidence", 0) >= 60:
             price = market_data["close"]
-            qty = calc_position_size(equity, price, risk_cfg["max_position_pct"])
-            if qty > 0:
-                stop_price, target_price = stop_loss_take_profit_prices(
-                        price,
-                        risk_cfg["stop_loss_pct"],
-                        risk_cfg["take_profit_pct"],
-                        decision["action"],
-                    )
-                try:
-                    order = submit_bracket_order(
-                        trading_client, symbol, qty, decision["action"], stop_price, target_price
-                    )
+
+            if decision["action"] == "BUY":
+                # Size against available cash, not total equity
+                qty = calc_position_size(cash, price, risk_cfg["max_position_pct"])
+                cost = qty * price
+                if qty <= 0 or cost > cash:
+                    decision["trade_submitted"] = False
+                    decision["error"] = f"Insufficient cash (need ${cost:.2f}, have ${cash:.2f})"
+                    results.append(decision)
+                    continue
+            else:
+                # SELL: qty doesn't matter, close_position handles it
+                qty = 1
+
+            stop_price, target_price = stop_loss_take_profit_prices(
+                price,
+                risk_cfg["stop_loss_pct"],
+                risk_cfg["take_profit_pct"],
+                decision["action"],
+            )
+            try:
+                order = submit_bracket_order(
+                    trading_client, symbol, qty, decision["action"], stop_price, target_price
+                )
+                if order is not None:
                     trade_row = {
                         "timestamp": datetime.utcnow().isoformat(),
                         "symbol": symbol,
@@ -60,9 +73,12 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
                         "order_id": str(order.id),
                     }
                     log_row(config.TRADES_LOG, trade_row)
-                    decision["trade_submitted"] = True
-                except Exception as e:
-                    decision["trade_submitted"] = False
-                    decision["error"] = str(e)
+                    # Deduct cost from local cash so subsequent symbols are sized correctly
+                    if decision["action"] == "BUY":
+                        cash -= cost
+                decision["trade_submitted"] = order is not None
+            except Exception as e:
+                decision["trade_submitted"] = False
+                decision["error"] = str(e)
         results.append(decision)
     return results, equity, cash

@@ -206,7 +206,7 @@ def execute_cycle():
 
         trading_client_local = get_trading_client()
         from risk_manager import get_account_equity as _gae
-        equity_local, _ = _gae(trading_client_local)
+        equity_local, cash_local = _gae(trading_client_local)
         snapshot = get_market_snapshot(symbols)
 
         if not snapshot:
@@ -229,23 +229,35 @@ def execute_cycle():
 
             if decision["action"] in ("BUY", "SELL") and decision.get("confidence", 0) >= 60:
                 price = market_data["close"]
-                qty = calc_position_size(equity_local, price, risk_cfg["max_position_pct"])
-                if qty > 0:
-                    stop_price, target_price = stop_loss_take_profit_prices(
-                        price,
-                        risk_cfg["stop_loss_pct"],
-                        risk_cfg["take_profit_pct"],
+
+                if decision["action"] == "BUY":
+                    # Size against available cash, not total equity
+                    qty = calc_position_size(cash_local, price, risk_cfg["max_position_pct"])
+                    cost = qty * price
+                    if qty <= 0 or cost > cash_local:
+                        decision["trade_submitted"] = False
+                        decision["error"] = f"Insufficient cash (need ${cost:.2f}, have ${cash_local:.2f})"
+                        results.append(decision)
+                        continue
+                else:
+                    qty = 1  # SELL uses close_position, qty irrelevant
+
+                stop_price, target_price = stop_loss_take_profit_prices(
+                    price,
+                    risk_cfg["stop_loss_pct"],
+                    risk_cfg["take_profit_pct"],
+                    decision["action"],
+                )
+                try:
+                    order = submit_bracket_order(
+                        trading_client_local,
+                        symbol,
+                        qty,
                         decision["action"],
+                        stop_price,
+                        target_price,
                     )
-                    try:
-                        order = submit_bracket_order(
-                            trading_client_local,
-                            symbol,
-                            qty,
-                            decision["action"],
-                            stop_price,
-                            target_price,
-                        )
+                    if order is not None:
                         from orchestrator import log_row as _lr
                         _lr(_cfg.TRADES_LOG, {
                             "timestamp": datetime.utcnow().isoformat(),
@@ -257,10 +269,12 @@ def execute_cycle():
                             "target_price": target_price,
                             "order_id": str(order.id),
                         })
-                        decision["trade_submitted"] = True
-                    except Exception as e:
-                        decision["trade_submitted"] = False
-                        decision["error"] = str(e)
+                        if decision["action"] == "BUY":
+                            cash_local -= cost
+                    decision["trade_submitted"] = order is not None
+                except Exception as e:
+                    decision["trade_submitted"] = False
+                    decision["error"] = str(e)
 
             results.append(decision)
 
@@ -332,8 +346,6 @@ if st.session_state["auto_running"]:
                 schedule_next_run(run_interval_minutes)
             finally:
                 st.session_state["cycle_running"] = False
-            # Do NOT st.rerun() here — let the page render the results first.
-            # The rerun below (after the 1s sleep) will handle the timer refresh.
 
     # ---- Latest AI Decisions (shown inline during auto-run so results are visible) ----
     if st.session_state.get("last_results"):
@@ -343,12 +355,10 @@ if st.session_state["auto_running"]:
             df_results["timestamp"] = df_results["timestamp"].apply(fmt_ts)
         st.dataframe(df_results, width="stretch")
 
-    # Only rerun to tick the countdown — results are already rendered above.
     if not st.session_state["cycle_just_finished"]:
         time.sleep(1)
         st.rerun()
     else:
-        # First render after a cycle: show results, reset flag, then start ticking.
         st.session_state["cycle_just_finished"] = False
         time.sleep(2)
         st.rerun()
