@@ -30,6 +30,21 @@ def _get_crypto_client():
     return CryptoHistoricalDataClient(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY)
 
 
+def _smart_round(value: float) -> float:
+    """Round to 2 dp for normal prices; preserve up to 10 significant figures
+    for micro-priced assets like SHIB ($0.0000145) that round to $0.00 at 2dp.
+    """
+    if value == 0:
+        return 0.0
+    if value >= 0.01:
+        return round(value, 2)
+    # Find the first significant digit and keep 6 sig figs beyond it
+    import math
+    magnitude = math.floor(math.log10(abs(value)))
+    decimal_places = max(2, -magnitude + 5)
+    return round(value, decimal_places)
+
+
 def fetch_bars(symbols, lookback_days=10, timeframe=TimeFrame.Hour):
     """Fetch OHLCV bars for a mixed list of stock and crypto symbols.
     Returns a combined DataFrame indexed by (symbol, timestamp).
@@ -86,9 +101,9 @@ def get_market_snapshot(symbols, timeframe=TimeFrame.Hour):
         sym_df = compute_indicators(sym_df)
         last = sym_df.iloc[-1]
         snapshot[sym] = {
-            "close": round(float(last["close"]), 2),
-            "sma_10": round(float(last["sma_10"]), 2) if pd.notna(last["sma_10"]) else None,
-            "sma_30": round(float(last["sma_30"]), 2) if pd.notna(last["sma_30"]) else None,
+            "close": _smart_round(float(last["close"])),
+            "sma_10": _smart_round(float(last["sma_10"])) if pd.notna(last["sma_10"]) else None,
+            "sma_30": _smart_round(float(last["sma_30"])) if pd.notna(last["sma_30"]) else None,
             "rsi_14": round(float(last["rsi_14"]), 1) if pd.notna(last["rsi_14"]) else None,
         }
     return snapshot
