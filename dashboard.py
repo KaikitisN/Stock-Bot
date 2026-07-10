@@ -55,6 +55,8 @@ def ensure_scheduler_state():
         st.session_state["last_results"] = []
     if "last_run_time" not in st.session_state:
         st.session_state["last_run_time"] = None
+    if "cycle_just_finished" not in st.session_state:
+        st.session_state["cycle_just_finished"] = False
 
 
 def schedule_next_run(run_interval_minutes: int):
@@ -274,6 +276,7 @@ def execute_cycle():
 
     st.session_state["last_results"] = results
     st.session_state["last_run_time"] = datetime.utcnow().isoformat()
+    st.session_state["cycle_just_finished"] = True
 
 
 # ---- Manual run ----
@@ -329,22 +332,39 @@ if st.session_state["auto_running"]:
                 schedule_next_run(run_interval_minutes)
             finally:
                 st.session_state["cycle_running"] = False
-            st.rerun()
+            # Do NOT st.rerun() here — let the page render the results first.
+            # The rerun below (after the 1s sleep) will handle the timer refresh.
 
-    time.sleep(1)
-    st.rerun()
+    # ---- Latest AI Decisions (shown inline during auto-run so results are visible) ----
+    if st.session_state.get("last_results"):
+        st.subheader("Latest AI Decisions")
+        df_results = pd.DataFrame(st.session_state["last_results"])
+        if "timestamp" in df_results.columns:
+            df_results["timestamp"] = df_results["timestamp"].apply(fmt_ts)
+        st.dataframe(df_results, width="stretch")
+
+    # Only rerun to tick the countdown — results are already rendered above.
+    if not st.session_state["cycle_just_finished"]:
+        time.sleep(1)
+        st.rerun()
+    else:
+        # First render after a cycle: show results, reset flag, then start ticking.
+        st.session_state["cycle_just_finished"] = False
+        time.sleep(2)
+        st.rerun()
+
 else:
     last = fmt_ts(st.session_state.get("last_run_time", ""))
     if last:
         status_placeholder.info(f"Last run: {last}.")
 
-# ---- Latest decisions ----
-if st.session_state.get("last_results"):
-    st.subheader("Latest AI Decisions")
-    df_results = pd.DataFrame(st.session_state["last_results"])
-    if "timestamp" in df_results.columns:
-        df_results["timestamp"] = df_results["timestamp"].apply(fmt_ts)
-    st.dataframe(df_results, width="stretch")
+    # ---- Latest AI Decisions (non-auto-run path) ----
+    if st.session_state.get("last_results"):
+        st.subheader("Latest AI Decisions")
+        df_results = pd.DataFrame(st.session_state["last_results"])
+        if "timestamp" in df_results.columns:
+            df_results["timestamp"] = df_results["timestamp"].apply(fmt_ts)
+        st.dataframe(df_results, width="stretch")
 
 # ---- History from logs ----
 st.subheader("Decision History")
