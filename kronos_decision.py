@@ -13,6 +13,8 @@ import sys
 import os
 import pandas as pd
 
+import config  # needed for KRONOS_SIGNAL_THRESHOLD_PCT
+
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 
