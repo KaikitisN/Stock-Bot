@@ -23,6 +23,39 @@ def _has_open_position(trading_client, symbol: str) -> bool:
         return False
 
 
+def liquidate_position(trading_client, symbol: str):
+    """Fully liquidates a position in one order.
+
+    For micro-priced crypto (e.g. SHIB) with billions of tokens,
+    close_position() can hit per-order qty limits and split into many
+    partial orders. Instead we submit a single notional SELL for the
+    full market value of the position, which Alpaca handles as one order
+    regardless of token count.
+
+    For stocks and normal-priced crypto, falls back to close_position().
+    Returns None if no position exists.
+    """
+    try:
+        pos = trading_client.get_open_position(symbol)
+    except Exception:
+        return None  # No position to close
+
+    market_value = abs(float(pos.market_value))
+
+    if _is_crypto(symbol) and market_value > 0:
+        # Use notional sell: sell exactly $market_value worth in one order
+        order_req = MarketOrderRequest(
+            symbol=symbol,
+            notional=round(market_value, 2),
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.GTC,
+        )
+        return trading_client.submit_order(order_req)
+
+    # Stocks or zero-value positions: standard close
+    return trading_client.close_position(symbol)
+
+
 def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_price):
     """Handles order submission per asset type and side.
 
@@ -31,16 +64,12 @@ def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_p
       - Stock:  bracket order with stop-loss + take-profit.
 
     SELL (both crypto and stocks):
-      - Uses close_position() which sells the exact qty held.
+      - Uses liquidate_position() which handles large qty via notional.
       - Returns None silently if no position exists.
       - Raises on any other error so the dashboard can display it.
     """
     if side == "SELL":
-        # Always use close_position for SELL — works for both stocks and crypto.
-        # This avoids qty mismatches and "insufficient balance" errors.
-        if not _has_open_position(trading_client, symbol):
-            return None
-        return trading_client.close_position(symbol)
+        return liquidate_position(trading_client, symbol)
 
     # BUY path
     if _is_crypto(symbol):

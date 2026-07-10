@@ -11,7 +11,7 @@ import streamlit as st
 
 import config
 from orchestrator import run_once
-from executor import get_trading_client, get_open_positions
+from executor import get_trading_client, get_open_positions, liquidate_position
 from risk_manager import get_account_equity
 
 
@@ -172,19 +172,35 @@ except Exception as e:
     st.error(f"Could not connect to Alpaca. Check your API keys in .env. ({e})")
     positions = []
 
+# ---- Open Positions with Liquidate buttons ----
 if positions:
+    st.subheader("Open Positions")
     pos_df = pd.DataFrame([
         {
             "Symbol": p.symbol,
             "Qty": p.qty,
             "Avg Entry": p.avg_entry_price,
             "Current Price": p.current_price,
+            "Market Value": p.market_value,
             "Unrealized P/L": p.unrealized_pl,
         }
         for p in positions
     ])
-    st.subheader("Open Positions")
     st.dataframe(pos_df, width="stretch")
+
+    st.markdown("**Manually liquidate a position (sells full holding in one order):**")
+    liq_cols = st.columns(min(len(positions), 6))
+    for idx, pos in enumerate(positions):
+        col = liq_cols[idx % 6]
+        if col.button(f"Sell all {pos.symbol}", key=f"liq_{pos.symbol}"):
+            try:
+                order = liquidate_position(trading_client, pos.symbol)
+                if order:
+                    st.success(f"✅ Liquidation order submitted for {pos.symbol} (order id: {order.id})")
+                else:
+                    st.warning(f"No open position found for {pos.symbol}.")
+            except Exception as e:
+                st.error(f"❌ Failed to liquidate {pos.symbol}: {e}")
 
 # ---- Run cycle with per-symbol Kronos progress ----
 def execute_cycle():
@@ -231,7 +247,6 @@ def execute_cycle():
                 price = market_data["close"]
 
                 if decision["action"] == "BUY":
-                    # Size against available cash, not total equity
                     qty = calc_position_size(cash_local, price, risk_cfg["max_position_pct"])
                     cost = qty * price
                     if qty <= 0 or cost > cash_local:
@@ -240,7 +255,7 @@ def execute_cycle():
                         results.append(decision)
                         continue
                 else:
-                    qty = 1  # SELL uses close_position, qty irrelevant
+                    qty = 1  # SELL uses liquidate_position, qty irrelevant
 
                 stop_price, target_price = stop_loss_take_profit_prices(
                     price,
@@ -347,7 +362,6 @@ if st.session_state["auto_running"]:
             finally:
                 st.session_state["cycle_running"] = False
 
-    # ---- Latest AI Decisions (shown inline during auto-run so results are visible) ----
     if st.session_state.get("last_results"):
         st.subheader("Latest AI Decisions")
         df_results = pd.DataFrame(st.session_state["last_results"])
@@ -368,7 +382,6 @@ else:
     if last:
         status_placeholder.info(f"Last run: {last}.")
 
-    # ---- Latest AI Decisions (non-auto-run path) ----
     if st.session_state.get("last_results"):
         st.subheader("Latest AI Decisions")
         df_results = pd.DataFrame(st.session_state["last_results"])
