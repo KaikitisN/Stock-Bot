@@ -26,40 +26,41 @@ def _has_open_position(trading_client, symbol: str) -> bool:
 def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_price):
     """Handles order submission per asset type and side.
 
-    - Crypto BUY/SELL: plain market order (Alpaca does not support bracket/OTOCO for crypto).
-    - Stock BUY: bracket order with stop-loss + take-profit attached.
-    - Stock SELL: closes the existing long position via close_position().
-      Raises the original exception if the close fails so the caller can log it.
-    """
-    if _is_crypto(symbol):
-        order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL
-        order_req = MarketOrderRequest(
-            symbol=symbol,
-            qty=qty,
-            side=order_side,
-            time_in_force=TimeInForce.GTC,
-        )
-        return trading_client.submit_order(order_req)
+    BUY:
+      - Crypto: plain GTC market order (no bracket support on Alpaca for crypto).
+      - Stock:  bracket order with stop-loss + take-profit.
 
+    SELL (both crypto and stocks):
+      - Uses close_position() which sells the exact qty held.
+      - Returns None silently if no position exists.
+      - Raises on any other error so the dashboard can display it.
+    """
     if side == "SELL":
-        # Close the existing long position.
-        # Do NOT catch exceptions here — let them bubble up to the dashboard
-        # so the error is visible instead of silently swallowed.
+        # Always use close_position for SELL — works for both stocks and crypto.
+        # This avoids qty mismatches and "insufficient balance" errors.
         if not _has_open_position(trading_client, symbol):
-            # Nothing to close — skip gracefully.
             return None
         return trading_client.close_position(symbol)
 
-    # Stock BUY: bracket order with stop-loss and take-profit
-    order_req = MarketOrderRequest(
-        symbol=symbol,
-        qty=qty,
-        side=OrderSide.BUY,
-        time_in_force=TimeInForce.DAY,
-        order_class="bracket",
-        stop_loss=StopLossRequest(stop_price=stop_price),
-        take_profit=TakeProfitRequest(limit_price=target_price),
-    )
+    # BUY path
+    if _is_crypto(symbol):
+        order_req = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.GTC,
+        )
+    else:
+        order_req = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+            order_class="bracket",
+            stop_loss=StopLossRequest(stop_price=stop_price),
+            take_profit=TakeProfitRequest(limit_price=target_price),
+        )
+
     return trading_client.submit_order(order_req)
 
 
