@@ -2,6 +2,8 @@
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.enums import QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
 import config
 
 
@@ -19,6 +21,16 @@ def _has_open_position(trading_client, symbol: str) -> bool:
     try:
         pos = trading_client.get_open_position(symbol)
         return pos is not None
+    except Exception:
+        return False
+
+
+def _has_pending_order(trading_client, symbol: str) -> bool:
+    """Returns True if there's already an open/pending order for this symbol."""
+    try:
+        request = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+        orders = trading_client.get_orders(filter=request)
+        return len(orders) > 0
     except Exception:
         return False
 
@@ -55,23 +67,38 @@ def liquidate_position(trading_client, symbol: str):
     # Stocks or zero-value positions: standard close
     return trading_client.close_position(symbol)
 
+def _round_price(symbol: str, price: float) -> float:
+    """Alpaca requires whole-cent increments for stocks priced >= $1,
+    and up to 4 decimal places for sub-$1 stocks. Crypto has its own rules."""
+    if price >= 1.0:
+        return round(price, 2)
+    return round(price, 4)
 
 def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_price):
-    """Handles order submission per asset type and side.
+    if not _is_crypto(symbol):
+        stop_price = _round_price(symbol, stop_price)
+        target_price = _round_price(symbol, target_price)
 
-    BUY:
-      - Crypto: plain GTC market order (no bracket support on Alpaca for crypto).
-      - Stock:  bracket order with stop-loss + take-profit.
-
-    SELL (both crypto and stocks):
-      - Uses liquidate_position() which handles large qty via notional.
-      - Returns None silently if no position exists.
-      - Raises on any other error so the dashboard can display it.
-    """
     if side == "SELL":
-        return liquidate_position(trading_client, symbol)
+        if _has_open_position(trading_client, symbol):
+            return liquidate_position(trading_client, symbol)
 
-    # BUY path
+        if _is_crypto(symbol):
+            raise ValueError(
+                f"Cannot short {symbol}: Alpaca does not support short-selling crypto."
+            )
+
+        order_req = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+            order_class="bracket",
+            stop_loss=StopLossRequest(stop_price=stop_price),
+            take_profit=TakeProfitRequest(limit_price=target_price),
+        )
+        return trading_client.submit_order(order_req)
+
     if _is_crypto(symbol):
         order_req = MarketOrderRequest(
             symbol=symbol,
@@ -91,7 +118,6 @@ def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_p
         )
 
     return trading_client.submit_order(order_req)
-
 
 def get_open_positions(trading_client):
     return trading_client.get_all_positions()

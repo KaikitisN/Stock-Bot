@@ -10,22 +10,36 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from orchestrator import run_once
+from orchestrator import log_row, run_once
 from executor import get_trading_client, get_open_positions, liquidate_position
 from risk_manager import get_account_equity
+from alpaca.trading.enums import QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
 
 
 st.set_page_config(page_title="AI Trading Bot", layout="wide")
 st.title("AI Trading Bot Dashboard")
 
-
+def _has_pending_order(trading_client, symbol):
+    """Returns True if there's already an open/pending order for this symbol."""
+    try:
+        request = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+        orders = trading_client.get_orders(filter=request)
+        return len(orders) > 0
+    except Exception:
+        return False
+    
 def read_csv_with_fallback(path: str) -> pd.DataFrame:
     for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
         try:
-            return pd.read_csv(path, encoding=encoding)
+            return pd.read_csv(path, encoding=encoding, on_bad_lines="skip")
         except UnicodeDecodeError:
             continue
-    return pd.read_csv(path, encoding="latin1")
+        except pd.errors.ParserError:
+            return pd.read_csv(
+                path, encoding=encoding, on_bad_lines="skip", engine="python"
+            )
+    return pd.read_csv(path, encoding="latin1", on_bad_lines="skip", engine="python")
 
 
 def fmt_ts(ts_value) -> str:
@@ -63,6 +77,20 @@ def schedule_next_run(run_interval_minutes: int):
     st.session_state["next_run_time"] = (
         pd.Timestamp.utcnow() + pd.Timedelta(minutes=run_interval_minutes)
     )
+
+
+def _get_position_side(trading_client, symbol):
+    """Returns 'long', 'short', or None if no position exists."""
+    try:
+        pos = trading_client.get_open_position(symbol)
+        qty = float(pos.qty)
+        if qty > 0:
+            return "long"
+        elif qty < 0:
+            return "short"
+        return None
+    except Exception:
+        return None
 
 
 ensure_scheduler_state()
@@ -202,6 +230,7 @@ if positions:
             except Exception as e:
                 st.error(f"❌ Failed to liquidate {pos.symbol}: {e}")
 
+
 # ---- Run cycle with per-symbol Kronos progress ----
 def execute_cycle():
     is_kronos = "kronos" in provider_name.lower()
@@ -222,7 +251,7 @@ def execute_cycle():
 
         trading_client_local = get_trading_client()
         from risk_manager import get_account_equity as _gae
-        equity_local, cash_local = _gae(trading_client_local)
+        equity_local, _ = _gae(trading_client_local)
         snapshot = get_market_snapshot(symbols)
 
         if not snapshot:
@@ -233,64 +262,68 @@ def execute_cycle():
 
         for i, (symbol, market_data) in enumerate(snapshot.items()):
             pct = int(((i + 1) / total) * 100)
-            progress_bar.progress(
-                pct,
-                text=f"Analyzing {symbol} ({i + 1}/{total})..."
-            )
+            progress_bar.progress(pct, text=f"Analyzing {symbol} ({i + 1}/{total})...")
             status_text.markdown(f"**Kronos is working on:** `{symbol}`")
 
             decision = get_decision(symbol, market_data, provider_name, use_news)
             decision["timestamp"] = datetime.utcnow().isoformat()
-            log_row(_cfg.DECISIONS_LOG, decision)
+            decision["trade_submitted"] = False
+            decision["error"] = ""
 
             if decision["action"] in ("BUY", "SELL") and decision.get("confidence", 0) >= 60:
-                price = market_data["close"]
+                current_side = _get_position_side(trading_client_local, symbol)
+                has_pending = _has_pending_order(trading_client_local, symbol)
 
-                if decision["action"] == "BUY":
-                    qty = calc_position_size(cash_local, price, risk_cfg["max_position_pct"])
-                    cost = qty * price
-                    if qty <= 0 or cost > cash_local:
-                        decision["trade_submitted"] = False
-                        decision["error"] = f"Insufficient cash (need ${cost:.2f}, have ${cash_local:.2f})"
-                        results.append(decision)
-                        continue
-                else:
-                    qty = 1  # SELL uses liquidate_position, qty irrelevant
+                wants_long = decision["action"] == "BUY"
+                wants_short = decision["action"] == "SELL"
 
-                stop_price, target_price = stop_loss_take_profit_prices(
-                    price,
-                    risk_cfg["stop_loss_pct"],
-                    risk_cfg["take_profit_pct"],
-                    decision["action"],
+                already_matches = (
+                    (wants_long and current_side == "long") or
+                    (wants_short and current_side == "short")
                 )
-                try:
-                    order = submit_bracket_order(
-                        trading_client_local,
-                        symbol,
-                        qty,
-                        decision["action"],
-                        stop_price,
-                        target_price,
-                    )
-                    if order is not None:
-                        from orchestrator import log_row as _lr
-                        _lr(_cfg.TRADES_LOG, {
-                            "timestamp": datetime.utcnow().isoformat(),
-                            "symbol": symbol,
-                            "side": decision["action"],
-                            "qty": qty,
-                            "entry_price": price,
-                            "stop_price": stop_price,
-                            "target_price": target_price,
-                            "order_id": str(order.id),
-                        })
-                        if decision["action"] == "BUY":
-                            cash_local -= cost
-                    decision["trade_submitted"] = order is not None
-                except Exception as e:
-                    decision["trade_submitted"] = False
-                    decision["error"] = str(e)
 
+                if already_matches:
+                    decision["error"] = (
+                        f"Skipped: already holding a {current_side} position in {symbol}. "
+                        f"No repeat entry until position is closed."
+                    )
+                elif has_pending:
+                    decision["error"] = (
+                     f"Skipped: an order for {symbol} is already pending/queued "
+                    f"(likely waiting for market open). No duplicate submission."
+                    )
+                else:
+                    price = market_data["close"]
+                    qty = calc_position_size(equity_local, price, risk_cfg["max_position_pct"])
+
+                    if qty <= 0:
+                        decision["error"] = (
+                            f"Calculated qty was {qty} (price=${price}, "
+                            f"max_position_pct={risk_cfg['max_position_pct']}). "
+                            f"Position size too small for this equity/price ratio."
+                        )
+                    else:
+                        stop_price, target_price = stop_loss_take_profit_prices(
+                            price, risk_cfg["stop_loss_pct"], risk_cfg["take_profit_pct"], decision["action"]
+                        )
+                        try:
+                            order = submit_bracket_order(
+                                trading_client_local, symbol, qty, decision["action"], stop_price, target_price
+                            )
+                            from orchestrator import log_row as _lr
+                            _lr(_cfg.TRADES_LOG, {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "symbol": symbol, "side": decision["action"],
+                                "qty": qty, "entry_price": price,
+                                "stop_price": stop_price, "target_price": target_price,
+                                "order_id": str(order.id),
+                            })
+                            decision["trade_submitted"] = True
+                        except Exception as e:
+                            decision["trade_submitted"] = False
+                            decision["error"] = f"{type(e).__name__}: {str(e)}"
+
+            log_row(_cfg.DECISIONS_LOG, decision)
             results.append(decision)
 
         progress_bar.progress(100, text="Done!")
