@@ -44,16 +44,22 @@ FREQUENCY_OPTIONS = {
     "Every hour": 60,
     "Once a day": 1440,
 }
-DEFAULT_FREQUENCY = "Every 15 minutes"
+DEFAULT_FREQUENCY = "Every 30 minutes"
 
 # --- Universe ---
-DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA"]
+DEFAULT_SYMBOLS = [    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "NFLX",
+    "AMD", "INTC", "BABA", "PYPL", "SQ", "SHOP", "COIN", "HOOD",
+    "JPM", "BAC", "GS", "MS", "WFC", "V", "MA",
+    "SPY", "QQQ", "DIA", "IWM", "ARKK",
+    "BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "ADA/USD",
+    "AVAX/USD", "DOT/USD", "LINK/USD", "MATIC/USD", "XRP/USD",
+    "LTC/USD", "BCH/USD", "UNI/USD", "AAVE/USD"]
 
 # --- Risk limits (all as % of account equity) ---
 DEFAULT_RISK = {
     "max_position_pct": 5.0,
-    "stop_loss_pct": 2.0,
-    "take_profit_pct": 4.0,
+    "stop_loss_pct": 3.0,
+    "take_profit_pct": 6.0,
     "max_daily_loss_pct": 3.0,
 }
 

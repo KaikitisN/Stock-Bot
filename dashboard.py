@@ -15,10 +15,11 @@ from executor import get_trading_client, get_open_positions, liquidate_position
 from risk_manager import get_account_equity
 from alpaca.trading.enums import QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest
-
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="AI Trading Bot", layout="wide")
 st.title("AI Trading Bot Dashboard")
+st_autorefresh(interval=60000, key="dashboard_autorefresh")
 
 def _has_pending_order(trading_client, symbol):
     """Returns True if there's already an open/pending order for this symbol."""
@@ -199,7 +200,44 @@ try:
 except Exception as e:
     st.error(f"Could not connect to Alpaca. Check your API keys in .env. ({e})")
     positions = []
+# ---- Background Runner Live Status ----
+import json as _json
 
+st.subheader("Background Runner Status")
+status_path = f"{config.LOG_DIR}/runner_status.json"
+try:
+    with open(status_path, "r", encoding="utf-8") as f:
+        runner_status = _json.load(f)
+
+    state = runner_status.get("state", "unknown")
+    current_symbol = runner_status.get("current_symbol")
+    current_index = runner_status.get("current_index", 0)
+    total_symbols = runner_status.get("total_symbols", 0)
+
+    if state == "running" and current_symbol:
+        st.info(f"🔄 Processing **{current_symbol}** ({current_index}/{total_symbols})")
+        if total_symbols > 0:
+            st.progress(current_index / total_symbols)
+    elif state == "idle":
+        finished_at = runner_status.get("cycle_finished_at", "")
+        st.success(f"✅ Idle — last cycle finished at {finished_at}")
+    elif state == "error":
+        st.error(f"❌ Runner error: {runner_status.get('error')}")
+    else:
+        st.warning("Background runner status unknown.")
+
+    last_result = runner_status.get("last_result")
+    if last_result:
+        st.caption(
+            f"Last decision: {last_result.get('symbol')} → "
+            f"{last_result.get('action')} "
+            f"(confidence={last_result.get('confidence')}, "
+            f"submitted={last_result.get('trade_submitted')})"
+        )
+except FileNotFoundError:
+    st.warning("Background runner hasn't started yet, or status file not found.")
+except Exception as e:
+    st.error(f"Could not read runner status: {e}")
 # ---- Open Positions with Liquidate buttons ----
 if positions:
     st.subheader("Open Positions")

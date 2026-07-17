@@ -21,3 +21,4 @@ huggingface_hub>=0.23.0
 transformers>=4.40.0
 einops>=0.7.0
 numpy>=1.26.0
+streamlit-autorefresh>=1.0.1

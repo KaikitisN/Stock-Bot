@@ -14,6 +14,16 @@ from executor import get_trading_client, submit_bracket_order
 
 os.makedirs(config.LOG_DIR, exist_ok=True)
 
+def is_stock_market_open(trading_client) -> bool:
+    """Crypto trades 24/7; only stocks need this check."""
+    try:
+        clock = trading_client.get_clock()
+        return clock.is_open
+    except Exception:
+        return False
+
+def _is_crypto(symbol: str) -> bool:
+    return "/" in symbol
 
 def log_row(path, row: dict):
     file_exists = os.path.isfile(path)
@@ -28,6 +38,22 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
     trading_client = get_trading_client()
     equity, cash = get_account_equity(trading_client)
     snapshot = get_market_snapshot(symbols)
+    market_open = is_stock_market_open(trading_client)
+
+    tradable_symbols = [
+        s for s in symbols if _is_crypto(s) or market_open
+    ]
+    skipped = [s for s in symbols if s not in tradable_symbols]
+
+    snapshot = get_market_snapshot(tradable_symbols)
+    results = []
+    for symbol in skipped:
+        results.append({
+            "symbol": symbol,
+            "action": "SKIPPED",
+            "reason": "Stock market closed",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
     results = []
 
     for symbol, market_data in snapshot.items():
