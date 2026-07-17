@@ -525,17 +525,37 @@ def render_trading_bots_page(equity, cash, positions, error, trading_client):
         current_symbol = runner_status.get("current_symbol")
         current_index = runner_status.get("current_index", 0)
         total_symbols = runner_status.get("total_symbols", 0)
+        next_run_at = runner_status.get("next_run_at")
+        next_run_label = fmt_ts(next_run_at) if next_run_at else "—"
+
         if state == "running" and current_symbol:
             st.info(f"Processing **{current_symbol}** ({current_index}/{total_symbols})")
             if total_symbols > 0:
                 st.progress(current_index / total_symbols)
         elif state == "idle":
-            finished_at = runner_status.get("cycle_finished_at", "")
-            st.success(f"Idle — last cycle finished at {finished_at}")
+            finished_at = fmt_ts(runner_status.get("cycle_finished_at", ""))
+            st.success(
+                f"Idle — last cycle finished at **{finished_at or '—'}**. "
+                f"Next cycle at **{next_run_label}**."
+            )
         elif state == "error":
-            st.error(f"Runner error: {runner_status.get('error')}")
+            st.error(
+                f"Runner error: {runner_status.get('error')} — "
+                f"next retry at **{next_run_label}**"
+            )
         else:
             st.warning("Background runner status unknown.")
+
+        if next_run_at and state != "running":
+            try:
+                next_dt = pd.to_datetime(next_run_at, utc=True)
+                remaining = next_dt - pd.Timestamp.utcnow()
+                secs = max(int(remaining.total_seconds()), 0)
+                mins, sec_rem = secs // 60, secs % 60
+                st.caption(f"Countdown to next background cycle: **{mins:02d}:{sec_rem:02d}**")
+            except Exception:
+                pass
+
         last_result = runner_status.get("last_result")
         if last_result:
             st.caption(
