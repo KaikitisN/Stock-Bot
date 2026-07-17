@@ -138,17 +138,18 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
         p90 = float(predictions["close"].quantile(0.90))   # bullish scenario
         pct_change = (median_forecast - last_close) / last_close * 100
 
-        signal_threshold = getattr(config, "KRONOS_SIGNAL_THRESHOLD_PCT", 1.0)
+        signal_threshold = getattr(config, "KRONOS_SIGNAL_THRESHOLD_PCT", 2.5)
+        min_confidence = getattr(config, "MIN_TRADE_CONFIDENCE", 70)
 
         if pct_change > signal_threshold:
             action = "BUY"
-            confidence = min(int(50 + pct_change * 10), 95)
+            confidence = min(int(60 + pct_change * 8), 95)
         elif pct_change < -signal_threshold:
             action = "SELL"
-            confidence = min(int(50 + abs(pct_change) * 10), 95)
+            confidence = min(int(60 + abs(pct_change) * 8), 95)
         else:
             action = "HOLD"
-            confidence = 70
+            confidence = min(int(40 + abs(pct_change) * 5), min_confidence - 1)
 
         return {
             "symbol": symbol,

@@ -31,7 +31,13 @@ DEFAULT_AI_PROVIDER = "Kronos (Local)"
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
 # Minimum forecast move required before Kronos turns a prediction into BUY/SELL.
-KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "1.0"))
+KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "2.5"))
+
+# --- Trade quality gates ---
+MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "70"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "5"))
+USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
+ALLOW_SHORT_SELLING = os.getenv("ALLOW_SHORT_SELLING", "false").lower() == "true"
 
 # --- News toggle (Perplexity Sonar) ---
 USE_NEWS_DEFAULT = False
@@ -44,20 +50,17 @@ FREQUENCY_OPTIONS = {
     "Every hour": 60,
     "Once a day": 1440,
 }
-DEFAULT_FREQUENCY = "Every 30 minutes"
+DEFAULT_FREQUENCY = "Every hour"
 
-# --- Universe ---
-DEFAULT_SYMBOLS = [    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "NFLX",
-    "AMD", "INTC", "BABA", "PYPL", "SQ", "SHOP", "COIN", "HOOD",
-    "JPM", "BAC", "GS", "MS", "WFC", "V", "MA",
-    "SPY", "QQQ", "DIA", "IWM", "ARKK",
-    "BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "ADA/USD",
-    "AVAX/USD", "DOT/USD", "LINK/USD", "MATIC/USD", "XRP/USD",
-    "LTC/USD", "BCH/USD", "UNI/USD", "AAVE/USD"]
+# --- Universe (focused liquid watchlist) ---
+DEFAULT_SYMBOLS = [
+    "SPY", "QQQ", "AAPL", "NVDA", "MSFT",
+    "BTC/USD", "ETH/USD",
+]
 
 # --- Risk limits (all as % of account equity) ---
 DEFAULT_RISK = {
-    "max_position_pct": 5.0,
+    "max_position_pct": 3.0,
     "stop_loss_pct": 3.0,
     "take_profit_pct": 6.0,
     "max_daily_loss_pct": 3.0,
@@ -66,3 +69,4 @@ DEFAULT_RISK = {
 LOG_DIR = "logs"
 DECISIONS_LOG = f"{LOG_DIR}/decisions.csv"
 TRADES_LOG = f"{LOG_DIR}/trades.csv"
+DAY_STATE_FILE = f"{LOG_DIR}/day_state.json"

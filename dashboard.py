@@ -10,26 +10,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from orchestrator import log_row, run_once
+from orchestrator import log_row, run_once, process_symbol, is_stock_market_open
 from executor import get_trading_client, get_open_positions, liquidate_position
-from risk_manager import get_account_equity
-from alpaca.trading.enums import QueryOrderStatus
-from alpaca.trading.requests import GetOrdersRequest
+from risk_manager import get_account_equity, is_trading_halted
+from data_fetcher import get_market_snapshot
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="AI Trading Bot", layout="wide")
 st.title("AI Trading Bot Dashboard")
 st_autorefresh(interval=60000, key="dashboard_autorefresh")
 
-def _has_pending_order(trading_client, symbol):
-    """Returns True if there's already an open/pending order for this symbol."""
-    try:
-        request = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
-        orders = trading_client.get_orders(filter=request)
-        return len(orders) > 0
-    except Exception:
-        return False
-    
 def read_csv_with_fallback(path: str) -> pd.DataFrame:
     for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
         try:
@@ -80,20 +70,6 @@ def schedule_next_run(run_interval_minutes: int):
     )
 
 
-def _get_position_side(trading_client, symbol):
-    """Returns 'long', 'short', or None if no position exists."""
-    try:
-        pos = trading_client.get_open_position(symbol)
-        qty = float(pos.qty)
-        if qty > 0:
-            return "long"
-        elif qty < 0:
-            return "short"
-        return None
-    except Exception:
-        return None
-
-
 ensure_scheduler_state()
 
 # ---- Sidebar controls ----
@@ -125,7 +101,7 @@ search_query = st.sidebar.text_input(
     placeholder="e.g. AAPL, BTC/USD, ETH..."
 ).strip().upper()
 
-KNOWN_SYMBOLS = [
+KNOWN_SYMBOLS = list(dict.fromkeys(config.DEFAULT_SYMBOLS + [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "NFLX",
     "AMD", "INTC", "BABA", "PYPL", "SQ", "SHOP", "COIN", "HOOD",
     "JPM", "BAC", "GS", "MS", "WFC", "V", "MA",
@@ -133,7 +109,7 @@ KNOWN_SYMBOLS = [
     "BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "ADA/USD",
     "AVAX/USD", "DOT/USD", "LINK/USD", "MATIC/USD", "XRP/USD",
     "LTC/USD", "BCH/USD", "UNI/USD", "AAVE/USD", "SHIB/USD",
-]
+]))
 
 if search_query:
     filtered = [s for s in KNOWN_SYMBOLS if search_query in s]
@@ -182,6 +158,12 @@ risk_cfg = {
     "max_daily_loss_pct": max_daily_loss_pct,
 }
 
+st.sidebar.caption(
+    f"Min confidence: **{config.MIN_TRADE_CONFIDENCE}** | "
+    f"Max positions: **{config.MAX_OPEN_POSITIONS}** | "
+    f"Trend filter: **{'on' if config.USE_TREND_FILTER else 'off'}**"
+)
+
 mode_label = "PAPER TRADING" if config.ALPACA_PAPER else "LIVE TRADING"
 st.sidebar.markdown(f"**Mode:** `{mode_label}`")
 
@@ -197,6 +179,10 @@ try:
     col1.metric("Account Equity", f"${equity:,.2f}")
     col2.metric("Cash", f"${cash:,.2f}")
     col3.metric("Open Positions", len(positions))
+
+    halted, halt_reason = is_trading_halted(trading_client, max_daily_loss_pct)
+    if halted:
+        st.error(f"Trading halted: {halt_reason}")
 except Exception as e:
     st.error(f"Could not connect to Alpaca. Check your API keys in .env. ({e})")
     positions = []
@@ -275,100 +261,78 @@ def execute_cycle():
     total = len(symbols)
 
     if is_kronos and total > 0:
-        st.info(f"Running Kronos inference on {total} symbol(s)...")
-        progress_bar = st.progress(0, text="Starting...")
-        status_text = st.empty()
-
-        results = []
-        from orchestrator import log_row
-        from data_fetcher import get_market_snapshot
-        from ai_decision import get_decision
-        from risk_manager import calc_position_size, stop_loss_take_profit_prices
-        from executor import submit_bracket_order
-        import config as _cfg
-
         trading_client_local = get_trading_client()
-        from risk_manager import get_account_equity as _gae
-        equity_local, _ = _gae(trading_client_local)
-        snapshot = get_market_snapshot(symbols)
+        _, cash = get_account_equity(trading_client_local)
+        halted, halt_reason = is_trading_halted(
+            trading_client_local, risk_cfg["max_daily_loss_pct"]
+        )
+        market_open = is_stock_market_open(trading_client_local)
+        tradable = [s for s in symbols if "/" in s or market_open]
+        skipped = [s for s in symbols if s not in tradable]
 
-        if not snapshot:
-            st.warning("No market data returned for the selected symbols.")
-            st.session_state["last_results"] = []
-            st.session_state["last_run_time"] = datetime.utcnow().isoformat()
-            return
+        results = [
+            {
+                "symbol": symbol,
+                "action": "SKIPPED",
+                "confidence": 0,
+                "reason": "Stock market closed",
+                "provider": provider_name,
+                "timestamp": datetime.utcnow().isoformat(),
+                "trade_submitted": False,
+                "error": "",
+            }
+            for symbol in skipped
+        ]
 
-        for i, (symbol, market_data) in enumerate(snapshot.items()):
-            pct = int(((i + 1) / total) * 100)
-            progress_bar.progress(pct, text=f"Analyzing {symbol} ({i + 1}/{total})...")
-            status_text.markdown(f"**Kronos is working on:** `{symbol}`")
+        if halted:
+            st.warning(halt_reason)
+            for symbol in tradable:
+                results.append({
+                    "symbol": symbol,
+                    "action": "HALTED",
+                    "confidence": 0,
+                    "reason": halt_reason,
+                    "provider": provider_name,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "trade_submitted": False,
+                    "error": halt_reason,
+                })
+        else:
+            st.info(f"Running Kronos inference on {len(tradable)} symbol(s)...")
+            progress_bar = st.progress(0, text="Starting...")
+            status_text = st.empty()
+            snapshot = get_market_snapshot(tradable)
 
-            decision = get_decision(symbol, market_data, provider_name, use_news)
-            decision["timestamp"] = datetime.utcnow().isoformat()
-            decision["trade_submitted"] = False
-            decision["error"] = ""
+            if not snapshot and not results:
+                st.warning("No market data returned for the selected symbols.")
+                st.session_state["last_results"] = []
+                st.session_state["last_run_time"] = datetime.utcnow().isoformat()
+                return
 
-            if decision["action"] in ("BUY", "SELL") and decision.get("confidence", 0) >= 60:
-                current_side = _get_position_side(trading_client_local, symbol)
-                has_pending = _has_pending_order(trading_client_local, symbol)
+            tradable_count = max(len(snapshot), 1)
+            for i, (symbol, market_data) in enumerate(snapshot.items()):
+                pct = int(((i + 1) / tradable_count) * 100)
+                progress_bar.progress(pct, text=f"Analyzing {symbol} ({i + 1}/{len(snapshot)})...")
+                status_text.markdown(f"**Kronos is working on:** `{symbol}`")
 
-                wants_long = decision["action"] == "BUY"
-                wants_short = decision["action"] == "SELL"
-
-                already_matches = (
-                    (wants_long and current_side == "long") or
-                    (wants_short and current_side == "short")
+                decision, cash = process_symbol(
+                    trading_client_local,
+                    symbol,
+                    market_data,
+                    provider_name,
+                    use_news,
+                    risk_cfg,
+                    cash,
+                    trading_halted=halted,
+                    halt_reason=halt_reason,
                 )
+                results.append(decision)
 
-                if already_matches:
-                    decision["error"] = (
-                        f"Skipped: already holding a {current_side} position in {symbol}. "
-                        f"No repeat entry until position is closed."
-                    )
-                elif has_pending:
-                    decision["error"] = (
-                     f"Skipped: an order for {symbol} is already pending/queued "
-                    f"(likely waiting for market open). No duplicate submission."
-                    )
-                else:
-                    price = market_data["close"]
-                    qty = calc_position_size(equity_local, price, risk_cfg["max_position_pct"])
-
-                    if qty <= 0:
-                        decision["error"] = (
-                            f"Calculated qty was {qty} (price=${price}, "
-                            f"max_position_pct={risk_cfg['max_position_pct']}). "
-                            f"Position size too small for this equity/price ratio."
-                        )
-                    else:
-                        stop_price, target_price = stop_loss_take_profit_prices(
-                            price, risk_cfg["stop_loss_pct"], risk_cfg["take_profit_pct"], decision["action"]
-                        )
-                        try:
-                            order = submit_bracket_order(
-                                trading_client_local, symbol, qty, decision["action"], stop_price, target_price
-                            )
-                            from orchestrator import log_row as _lr
-                            _lr(_cfg.TRADES_LOG, {
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "symbol": symbol, "side": decision["action"],
-                                "qty": qty, "entry_price": price,
-                                "stop_price": stop_price, "target_price": target_price,
-                                "order_id": str(order.id),
-                            })
-                            decision["trade_submitted"] = True
-                        except Exception as e:
-                            decision["trade_submitted"] = False
-                            decision["error"] = f"{type(e).__name__}: {str(e)}"
-
-            log_row(_cfg.DECISIONS_LOG, decision)
-            results.append(decision)
-
-        progress_bar.progress(100, text="Done!")
-        status_text.markdown("**Kronos finished all symbols ✅**")
-        time.sleep(1)
-        progress_bar.empty()
-        status_text.empty()
+            progress_bar.progress(100, text="Done!")
+            status_text.markdown("**Kronos finished all symbols ✅**")
+            time.sleep(1)
+            progress_bar.empty()
+            status_text.empty()
 
     else:
         with st.spinner(f"Running decision cycle with {provider_name}..."):

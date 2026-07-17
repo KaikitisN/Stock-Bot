@@ -31,10 +31,12 @@ RUN_INTERVAL_MINUTES = config.FREQUENCY_OPTIONS[config.DEFAULT_FREQUENCY]
 
 STATUS_PATH = f"{config.LOG_DIR}/runner_status.json"
 
+
 def write_status(status: dict):
     os.makedirs(config.LOG_DIR, exist_ok=True)
     with open(STATUS_PATH, "w", encoding="utf-8") as f:
         json.dump(status, f, indent=2, default=str)
+
 
 def job():
     total = len(SYMBOLS)
@@ -47,25 +49,15 @@ def job():
         "last_completed_symbol": None,
         "last_result": None,
     })
-    logger.info(f"Running trading cycle for symbols: {SYMBOLS}")
+    logger.info(f"Running trading cycle for {total} symbols: {SYMBOLS}")
 
-    results = []
     try:
-        for i, symbol in enumerate(SYMBOLS, start=1):
-            write_status({
-                "state": "running",
-                "cycle_started_at": datetime.now(timezone.utc).isoformat(),
-                "current_symbol": symbol,
-                "current_index": i,
-                "total_symbols": total,
-                "last_completed_symbol": results[-1]["symbol"] if results else None,
-                "last_result": results[-1] if results else None,
-            })
-            single_result, equity, cash = run_once([symbol], PROVIDER_NAME, USE_NEWS, RISK_CFG)
-            for r in single_result:
-                r["symbol"] = r.get("symbol", symbol)
-                results.append(r)
-                logger.info(f"  {symbol}: {r.get('action')} (confidence={r.get('confidence')}) submitted={r.get('trade_submitted')}")
+        results, equity, cash = run_once(SYMBOLS, PROVIDER_NAME, USE_NEWS, RISK_CFG)
+        for r in results:
+            logger.info(
+                f"  {r.get('symbol')}: {r.get('action')} "
+                f"(confidence={r.get('confidence')}) submitted={r.get('trade_submitted')}"
+            )
 
         write_status({
             "state": "idle",
@@ -76,14 +68,20 @@ def job():
             "last_completed_symbol": results[-1]["symbol"] if results else None,
             "last_result": results[-1] if results else None,
             "cycle_finished_at": datetime.now(timezone.utc).isoformat(),
+            "equity": equity,
+            "cash": cash,
         })
-        logger.info("Cycle complete.")
+        logger.info(f"Cycle complete. Equity=${equity:,.2f}, Cash=${cash:,.2f}")
     except Exception as e:
         logger.error(f"Cycle failed: {e}")
         write_status({"state": "error", "error": str(e)})
 
+
 if __name__ == "__main__":
-    logger.info(f"Starting background runner. Interval={RUN_INTERVAL_MINUTES} min, Provider={PROVIDER_NAME}")
+    logger.info(
+        f"Starting background runner. Interval={RUN_INTERVAL_MINUTES} min, "
+        f"Provider={PROVIDER_NAME}, Symbols={len(SYMBOLS)}"
+    )
     scheduler = BlockingScheduler()
     scheduler.add_job(job, "interval", minutes=RUN_INTERVAL_MINUTES, next_run_time=None)
     job()

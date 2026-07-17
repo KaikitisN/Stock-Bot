@@ -111,7 +111,10 @@ Set `KRONOS_MODEL_SIZE=mini` in `.env` to start (CPU-friendly).
 ---
 
 ## Risk Logic
-- AI confidence must be **≥ 60** for a trade to execute.
-- Position size is always capped at your `max_position_pct` of current equity.
-- Bracket orders attach stop-loss and take-profit at submission.
-- Daily loss limit halts the bot for the rest of the day if breached.
+- AI confidence must be **≥ 70** for a trade to execute (configurable via `MIN_TRADE_CONFIDENCE`).
+- Position size is capped at your `max_position_pct` of available cash.
+- Bracket orders attach stop-loss and take-profit at submission (stocks and crypto).
+- **Trend filter** blocks BUYs below SMA-30 and SELLs above SMA-30.
+- **Max 5 open positions** at once (configurable via `MAX_OPEN_POSITIONS`).
+- **Daily loss limit** halts the bot for the rest of the day if breached.
+- SELL signals only close existing positions (no short selling by default).
