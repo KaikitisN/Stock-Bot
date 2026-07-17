@@ -6,7 +6,7 @@ logs/runner_status.json so the dashboard can display current progress.
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -38,6 +38,11 @@ def write_status(status: dict):
         json.dump(status, f, indent=2, default=str)
 
 
+def next_run_iso(from_time: datetime | None = None) -> str:
+    base = from_time or datetime.now(timezone.utc)
+    return (base + timedelta(minutes=RUN_INTERVAL_MINUTES)).isoformat()
+
+
 def job():
     total = len(SYMBOLS)
     write_status({
@@ -48,6 +53,7 @@ def job():
         "total_symbols": total,
         "last_completed_symbol": None,
         "last_result": None,
+        "next_run_at": None,
     })
     logger.info(f"Running trading cycle for {total} symbols: {SYMBOLS}")
 
@@ -59,6 +65,8 @@ def job():
                 f"(confidence={r.get('confidence')}) submitted={r.get('trade_submitted')}"
             )
 
+        finished_at = datetime.now(timezone.utc)
+        next_at = next_run_iso(finished_at)
         write_status({
             "state": "idle",
             "cycle_started_at": None,
@@ -67,14 +75,22 @@ def job():
             "total_symbols": total,
             "last_completed_symbol": results[-1]["symbol"] if results else None,
             "last_result": results[-1] if results else None,
-            "cycle_finished_at": datetime.now(timezone.utc).isoformat(),
+            "cycle_finished_at": finished_at.isoformat(),
+            "next_run_at": next_at,
             "equity": equity,
             "cash": cash,
         })
-        logger.info(f"Cycle complete. Equity=${equity:,.2f}, Cash=${cash:,.2f}")
+        logger.info(
+            f"Cycle complete. Equity=${equity:,.2f}, Cash=${cash:,.2f}. "
+            f"Next run at {next_at}"
+        )
     except Exception as e:
         logger.error(f"Cycle failed: {e}")
-        write_status({"state": "error", "error": str(e)})
+        write_status({
+            "state": "error",
+            "error": str(e),
+            "next_run_at": next_run_iso(),
+        })
 
 
 if __name__ == "__main__":
@@ -83,6 +99,16 @@ if __name__ == "__main__":
         f"Provider={PROVIDER_NAME}, Symbols={len(SYMBOLS)}"
     )
     scheduler = BlockingScheduler()
-    scheduler.add_job(job, "interval", minutes=RUN_INTERVAL_MINUTES, next_run_time=None)
-    job()
+    # IMPORTANT: next_run_time=None pauses the job forever in APScheduler.
+    # Run immediately, then every RUN_INTERVAL_MINUTES.
+    scheduler.add_job(
+        job,
+        "interval",
+        minutes=RUN_INTERVAL_MINUTES,
+        next_run_time=datetime.now(timezone.utc),
+        id="trading_cycle",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     scheduler.start()
