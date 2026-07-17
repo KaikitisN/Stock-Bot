@@ -1,11 +1,12 @@
 """Submits orders to Alpaca (paper or live, controlled by ALPACA_PAPER in .env)."""
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
+    GetOrdersRequest,
+    GetPortfolioHistoryRequest,
     MarketOrderRequest,
     StopLossRequest,
-    TakeProfitRequest,
     StopOrderRequest,
-    GetOrdersRequest,
+    TakeProfitRequest,
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
 import config
@@ -165,3 +166,9 @@ def submit_bracket_order(trading_client, symbol, qty, side, stop_price, target_p
 
 def get_open_positions(trading_client):
     return trading_client.get_all_positions()
+
+
+def get_portfolio_history(trading_client, period: str = "1M"):
+    """Fetch daily equity history from Alpaca (period: 1W, 1M, 3M, 1A, all)."""
+    req = GetPortfolioHistoryRequest(period=period, timeframe="1D")
+    return trading_client.get_portfolio_history(req)

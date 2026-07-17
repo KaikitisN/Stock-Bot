@@ -15,6 +15,15 @@ def get_account_equity(trading_client):
     return float(account.equity), float(account.cash)
 
 
+def get_account_summary(trading_client) -> dict:
+    account = trading_client.get_account()
+    return {
+        "equity": float(account.equity),
+        "cash": float(account.cash),
+        "last_equity": float(getattr(account, "last_equity", account.equity)),
+    }
+
+
 def count_open_positions(trading_client) -> int:
     try:
         return len(trading_client.get_all_positions())

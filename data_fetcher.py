@@ -107,3 +107,50 @@ def get_market_snapshot(symbols, timeframe=TimeFrame.Hour):
             "rsi_14": round(float(last["rsi_14"]), 1) if pd.notna(last["rsi_14"]) else None,
         }
     return snapshot
+
+
+def get_price_series(symbols, lookback_days=5, timeframe=TimeFrame.Hour):
+    """Returns {symbol: list of close prices} for sparkline charts."""
+    try:
+        all_bars = fetch_bars(symbols, lookback_days=lookback_days, timeframe=timeframe)
+    except Exception:
+        return {}
+    series = {}
+    for sym in symbols:
+        try:
+            sym_df = all_bars.loc[sym].reset_index()
+            series[sym] = [round(float(p), 2) for p in sym_df["close"].tolist()]
+        except KeyError:
+            continue
+    return series
+
+
+def get_mover_stats(symbols, lookback_days=5, timeframe=TimeFrame.Hour):
+    """Returns {symbol: {price, change_pct, volume, sparkline}} for market widgets."""
+    try:
+        all_bars = fetch_bars(symbols, lookback_days=lookback_days, timeframe=timeframe)
+    except Exception:
+        return {}
+    stats = {}
+    for sym in symbols:
+        try:
+            sym_df = all_bars.loc[sym].reset_index()
+        except KeyError:
+            continue
+        if len(sym_df) < 2:
+            continue
+        closes = sym_df["close"].astype(float)
+        current = float(closes.iloc[-1])
+        prev = float(closes.iloc[-2]) if len(closes) >= 2 else current
+        first = float(closes.iloc[0])
+        change_pct = ((current - prev) / prev * 100) if prev else 0.0
+        change_24h = ((current - first) / first * 100) if first else 0.0
+        volume = float(sym_df["volume"].iloc[-1]) if "volume" in sym_df.columns else 0
+        stats[sym] = {
+            "price": round(current, 2),
+            "change_pct": round(change_pct, 2),
+            "change_24h_pct": round(change_24h, 2),
+            "volume": volume,
+            "sparkline": [round(float(p), 2) for p in closes.tolist()[-24:]],
+        }
+    return stats
