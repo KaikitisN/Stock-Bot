@@ -5,7 +5,7 @@ Run with: streamlit run dashboard.py
 """
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -41,7 +41,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 inject_theme()
-st_autorefresh(interval=60000, key="dashboard_autorefresh")
+# Refresh often enough to show live per-symbol background-runner progress
+st_autorefresh(interval=10000, key="dashboard_autorefresh")
 
 PAGES = ["Dashboard", "AI Trading Bots", "My Exchange", "Settings"]
 
@@ -70,17 +71,30 @@ def read_csv_with_fallback(path: str) -> pd.DataFrame:
 
 
 def fmt_ts(ts_value) -> str:
+    """Format timestamps as readable local date/time, e.g. 19 Jul 2026, 15:40:37."""
+    if ts_value is None or ts_value == "":
+        return ""
     try:
         if pd.isna(ts_value):
             return ""
     except Exception:
         pass
     try:
-        dt = pd.to_datetime(ts_value, utc=True).to_pydatetime()
-        local_dt = dt.astimezone()
-        return local_dt.strftime("%d/%m/%Y %H:%M:%S")
+        ts = pd.to_datetime(ts_value, utc=True)
+        if getattr(ts, "tzinfo", None) is None and not getattr(ts, "tz", None):
+            ts = ts.tz_localize("UTC")
+        local_ts = ts.tz_convert(datetime.now().astimezone().tzinfo)
+        return local_ts.strftime("%d %b %Y, %H:%M:%S")
     except Exception:
-        return str(ts_value)
+        try:
+            # Fallback for plain ISO strings
+            raw = str(ts_value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone().strftime("%d %b %Y, %H:%M:%S")
+        except Exception:
+            return str(ts_value)
 
 
 def init_session_state():
@@ -528,15 +542,28 @@ def render_trading_bots_page(equity, cash, positions, error, trading_client):
         next_run_at = runner_status.get("next_run_at")
         next_run_label = fmt_ts(next_run_at) if next_run_at else "—"
 
-        if state == "running" and current_symbol:
-            st.info(f"Processing **{current_symbol}** ({current_index}/{total_symbols})")
+        if state == "running":
+            label = current_symbol or "starting…"
+            pct = runner_status.get("progress_pct")
+            if pct is None and total_symbols:
+                pct = int((current_index / max(total_symbols, 1)) * 100)
+            st.info(
+                f"Processing **{label}** "
+                f"({current_index}/{total_symbols}"
+                f"{f', {pct}%' if pct is not None else ''})"
+            )
             if total_symbols > 0:
-                st.progress(current_index / total_symbols)
+                st.progress(min((pct or 0) / 100.0, 1.0))
+            last_completed = runner_status.get("last_completed_symbol")
+            if last_completed:
+                st.caption(f"Last completed: **{last_completed}**")
         elif state == "idle":
             finished_at = fmt_ts(runner_status.get("cycle_finished_at", ""))
+            interval = runner_status.get("interval_minutes")
+            interval_note = f" (every {interval} min)" if interval else ""
             st.success(
                 f"Idle — last cycle finished at **{finished_at or '—'}**. "
-                f"Next cycle at **{next_run_label}**."
+                f"Next cycle at **{next_run_label}**{interval_note}."
             )
         elif state == "error":
             st.error(
@@ -549,10 +576,15 @@ def render_trading_bots_page(equity, cash, positions, error, trading_client):
         if next_run_at and state != "running":
             try:
                 next_dt = pd.to_datetime(next_run_at, utc=True)
-                remaining = next_dt - pd.Timestamp.utcnow()
+                remaining = next_dt - pd.Timestamp.now(tz="UTC")
                 secs = max(int(remaining.total_seconds()), 0)
-                mins, sec_rem = secs // 60, secs % 60
-                st.caption(f"Countdown to next background cycle: **{mins:02d}:{sec_rem:02d}**")
+                hours, rem = divmod(secs, 3600)
+                mins, sec_rem = divmod(rem, 60)
+                if hours:
+                    countdown = f"{hours:d}h {mins:02d}m {sec_rem:02d}s"
+                else:
+                    countdown = f"{mins:02d}:{sec_rem:02d}"
+                st.caption(f"Countdown to next background cycle: **{countdown}**")
             except Exception:
                 pass
 
