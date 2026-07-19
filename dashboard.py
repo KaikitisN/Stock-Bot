@@ -79,20 +79,26 @@ def fmt_ts(ts_value) -> str:
             return ""
     except Exception:
         pass
+
+    tz_name = getattr(config, "DISPLAY_TIMEZONE", "Europe/Athens")
+    try:
+        from zoneinfo import ZoneInfo
+        display_tz = ZoneInfo(tz_name)
+    except Exception:
+        display_tz = timezone.utc
+        tz_name = "UTC"
+
     try:
         ts = pd.to_datetime(ts_value, utc=True)
-        if getattr(ts, "tzinfo", None) is None and not getattr(ts, "tz", None):
-            ts = ts.tz_localize("UTC")
-        local_ts = ts.tz_convert(datetime.now().astimezone().tzinfo)
-        return local_ts.strftime("%d %b %Y, %H:%M:%S")
+        local_ts = ts.tz_convert(display_tz)
+        return local_ts.strftime(f"%d %b %Y, %H:%M:%S ({tz_name})")
     except Exception:
         try:
-            # Fallback for plain ISO strings
             raw = str(ts_value).replace("Z", "+00:00")
             dt = datetime.fromisoformat(raw)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone().strftime("%d %b %Y, %H:%M:%S")
+            return dt.astimezone(display_tz).strftime(f"%d %b %Y, %H:%M:%S ({tz_name})")
         except Exception:
             return str(ts_value)
 

@@ -66,6 +66,10 @@ DEFAULT_RISK = {
     "max_daily_loss_pct": 3.0,
 }
 
+# --- Display ---
+# Timezone for dashboard timestamps (IANA name). Falls back to UTC if invalid.
+DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "Europe/Athens")
+
 LOG_DIR = "logs"
 DECISIONS_LOG = f"{LOG_DIR}/decisions.csv"
 TRADES_LOG = f"{LOG_DIR}/trades.csv"
