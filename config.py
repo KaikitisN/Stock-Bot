@@ -55,7 +55,7 @@ DEFAULT_FREQUENCY = "Every hour"
 # --- Universe (focused liquid watchlist) ---
 DEFAULT_SYMBOLS = [
     "SPY", "QQQ", "AAPL", "NVDA", "MSFT",
-    "BTC/USD", "ETH/USD",
+    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD",
 ]
 
 # --- Risk limits (all as % of account equity) ---
