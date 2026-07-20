@@ -25,7 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("background_runner")
 
-SYMBOLS = config.DEFAULT_SYMBOLS
 PROVIDER_NAME = config.DEFAULT_AI_PROVIDER
 USE_NEWS = config.USE_NEWS_DEFAULT
 RISK_CFG = config.DEFAULT_RISK
@@ -61,10 +60,11 @@ def _base_running_status(total: int, started_at: str) -> dict:
 
 def job() -> bool:
     """Run one trading cycle, updating per-symbol progress for the dashboard."""
-    total = len(SYMBOLS)
+    symbols = list(config.DEFAULT_SYMBOLS)
+    total = len(symbols)
     started_at = utc_now().isoformat()
     write_status(_base_running_status(total, started_at))
-    logger.info(f"Running trading cycle for {total} symbols: {SYMBOLS}")
+    logger.info(f"Running trading cycle for {total} symbols: {symbols}")
 
     try:
         trading_client = get_trading_client()
@@ -74,8 +74,8 @@ def job() -> bool:
         )
         market_open = is_stock_market_open(trading_client)
 
-        tradable = [s for s in SYMBOLS if "/" in s or market_open]
-        skipped = [s for s in SYMBOLS if s not in tradable]
+        tradable = [s for s in symbols if "/" in s or market_open]
+        skipped = [s for s in symbols if s not in tradable]
 
         results = []
         for symbol in skipped:
@@ -230,7 +230,7 @@ def wait_until_next_run(next_run_at: datetime):
 if __name__ == "__main__":
     logger.info(
         f"Starting background runner. Interval={RUN_INTERVAL_MINUTES} min, "
-        f"Provider={PROVIDER_NAME}, Symbols={len(SYMBOLS)}"
+        f"Provider={PROVIDER_NAME}, Symbols={len(config.DEFAULT_SYMBOLS)}"
     )
     while True:
         job()
