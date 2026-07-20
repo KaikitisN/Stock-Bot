@@ -275,6 +275,23 @@ def render_runner(runner_status):
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def prepare_log_table(df: pd.DataFrame, limit: int = 50) -> pd.DataFrame:
+    """Sort by timestamp newest-first, format for display, keep top N rows."""
+    if df.empty:
+        return df
+    out = df.copy()
+    if "timestamp" in out.columns:
+        sort_ts = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+        out = out.assign(_sort_ts=sort_ts).sort_values(
+            "_sort_ts", ascending=False, na_position="last"
+        )
+        out = out.drop(columns=["_sort_ts"]).head(limit)
+        out["timestamp"] = out["timestamp"].apply(fmt_ts)
+    else:
+        out = out.tail(limit).iloc[::-1]
+    return out.reset_index(drop=True)
+
+
 def render_decisions():
     st.markdown(
         '<div class="cc-section">'
@@ -285,17 +302,14 @@ def render_decisions():
     )
     st.markdown('<div class="cc-card">', unsafe_allow_html=True)
     try:
-        hist = read_csv_with_fallback(config.DECISIONS_LOG)
-        if "timestamp" in hist.columns:
-            hist = hist.copy()
-            hist["timestamp"] = hist["timestamp"].apply(fmt_ts)
+        hist = prepare_log_table(read_csv_with_fallback(config.DECISIONS_LOG))
         if hist.empty:
             st.markdown(
                 '<div class="cc-empty">No decisions logged yet.</div>',
                 unsafe_allow_html=True,
             )
         else:
-            st.dataframe(hist.tail(50), width="stretch")
+            st.dataframe(hist, width="stretch")
     except FileNotFoundError:
         st.markdown(
             '<div class="cc-empty">No decisions logged yet.</div>',
@@ -314,17 +328,14 @@ def render_orders():
     )
     st.markdown('<div class="cc-card">', unsafe_allow_html=True)
     try:
-        trades = read_csv_with_fallback(config.TRADES_LOG)
-        if "timestamp" in trades.columns:
-            trades = trades.copy()
-            trades["timestamp"] = trades["timestamp"].apply(fmt_ts)
+        trades = prepare_log_table(read_csv_with_fallback(config.TRADES_LOG))
         if trades.empty:
             st.markdown(
                 '<div class="cc-empty">No trades executed yet.</div>',
                 unsafe_allow_html=True,
             )
         else:
-            st.dataframe(trades.tail(50), width="stretch")
+            st.dataframe(trades, width="stretch")
     except FileNotFoundError:
         st.markdown(
             '<div class="cc-empty">No trades executed yet.</div>',

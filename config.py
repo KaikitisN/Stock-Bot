@@ -50,12 +50,12 @@ FREQUENCY_OPTIONS = {
     "Every hour": 60,
     "Once a day": 1440,
 }
-DEFAULT_FREQUENCY = "Every hour"
+DEFAULT_FREQUENCY = "Every 15 minutes"
 
 # --- Universe (focused liquid watchlist) ---
 DEFAULT_SYMBOLS = [
-    "SPY", "QQQ", "AAPL", "NVDA", "MSFT",
-    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD",
+    "SPY", "QQQ", "AAPL", "NVDA", "MSFT","GOOGL","AMZN","TSLA","META","NFLX","NVDA","AMD","INTC","MU","XOM"
+    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD","XRP/USD", "PAXG/USD", "BNB/USD", "MKR/USD"
 ]
 
 # --- Risk limits (all as % of account equity) ---
