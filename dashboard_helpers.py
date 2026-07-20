@@ -62,21 +62,21 @@ def build_donut_chart(segments: list[dict], total: float) -> go.Figure:
     fig = go.Figure(data=[go.Pie(
         labels=labels,
         values=values,
-        hole=0.72,
-        marker=dict(colors=colors, line=dict(color="#0a0b14", width=2)),
+        hole=0.68,
+        marker=dict(colors=colors, line=dict(color="#0c0d10", width=2)),
         textinfo="none",
-        hovertemplate="%{label}<br>$%{value:,.2f}<extra></extra>",
+        hovertemplate="%{label}<br>$%{value:,.2f} (%{percent})<extra></extra>",
     )])
     fig.update_layout(
         **_chart_layout(
             showlegend=False,
-            height=220,
+            height=280,
             annotations=[dict(
                 text=(
                     f"<b>$ {total:,.2f}</b><br>"
-                    f"<span style='font-size:11px;color:#64748b'>Total Balance</span>"
+                    f"<span style='font-size:11px;color:#71717a'>Holdings</span>"
                 ),
-                x=0.5, y=0.5, font_size=14, showarrow=False, font_color="#f1f5f9",
+                x=0.5, y=0.5, font_size=14, showarrow=False, font_color="#f4f4f5",
             )],
         ),
     )
