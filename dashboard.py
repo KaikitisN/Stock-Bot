@@ -248,14 +248,16 @@ def render_top_positions(positions, equity: float):
 
     body = ""
     for r in rows:
-        pl_class = "cc-pos-pl-pos" if r["pl"] >= 0 else "cc-pos-pl-neg"
+        pl_pill = "pos" if r["pl"] >= 0 else "neg"
         body += (
             "<tr>"
             f'<td class="asset">{r["symbol"]}</td>'
             f'<td class="num">{_fmt_money(r["price"])}</td>'
             f'<td class="num">{_fmt_qty(r["qty"])}</td>'
             f'<td class="num">{_fmt_money(r["value"])}</td>'
-            f'<td class="num {pl_class}">{_fmt_money(r["pl"], signed=True)}</td>'
+            f'<td class="num">'
+            f'<span class="cc-pos-pill {pl_pill}">{_fmt_money(r["pl"], signed=True)}</span>'
+            "</td>"
             "</tr>"
         )
 

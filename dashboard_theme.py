@@ -239,8 +239,34 @@ html, body, [class*="css"], .stApp, .stMarkdown, .stText {
     border-bottom: none;
 }
 
-.cc-pos-pl-pos { color: var(--cc-beat); }
-.cc-pos-pl-neg { color: var(--cc-miss); }
+.cc-pos-pl-pos,
+.cc-pos-table td.cc-pos-pl-pos {
+    color: #34d399 !important;
+    font-weight: 700;
+}
+
+.cc-pos-pl-neg,
+.cc-pos-table td.cc-pos-pl-neg {
+    color: #f87171 !important;
+    font-weight: 700;
+}
+
+.cc-pos-pill {
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.4rem;
+    font-weight: 700;
+}
+
+.cc-pos-pill.pos {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.14);
+}
+
+.cc-pos-pill.neg {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.14);
+}
 
 /* Streamlit overrides */
 div[data-testid="stMetric"] {
