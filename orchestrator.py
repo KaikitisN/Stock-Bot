@@ -113,8 +113,10 @@ def process_symbol(
         log_row(config.DECISIONS_LOG, decision)
         return decision, cash
 
-    if action == "SELL" and current_side is None:
-        decision["error"] = "Skipped: SELL signal but no position to close."
+    # Only skip a SELL with no position if short selling is disabled.
+    # When ALLOW_SHORT_SELLING=true, let executor.py handle the short order.
+    if action == "SELL" and current_side is None and not config.ALLOW_SHORT_SELLING:
+        decision["error"] = "Skipped: SELL signal but no position to close (short selling disabled)."
         log_row(config.DECISIONS_LOG, decision)
         return decision, cash
 
