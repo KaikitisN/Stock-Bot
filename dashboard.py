@@ -11,9 +11,9 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 import config
-from dashboard_helpers import build_donut_chart, portfolio_allocation
+from dashboard_helpers import build_donut_chart, portfolio_allocation, positions_table_data
 from dashboard_theme import inject_theme
-from executor import get_open_positions, get_portfolio_history, get_trading_client
+from executor import get_open_positions, get_trading_client
 from risk_manager import get_account_summary
 
 st.set_page_config(
@@ -22,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 inject_theme()
-st_autorefresh(interval=10000, key="dashboard_autorefresh")
+st_autorefresh(interval=45000, key="dashboard_autorefresh")
 
 
 def read_csv_with_fallback(path: str) -> pd.DataFrame:
@@ -71,22 +71,39 @@ def fmt_ts(ts_value) -> str:
             return str(ts_value)
 
 
-def fetch_account_data():
+def _serialize_position(p) -> dict:
+    return {
+        "symbol": p.symbol,
+        "qty": float(p.qty),
+        "market_value": float(p.market_value),
+        "current_price": float(p.current_price),
+        "unrealized_pl": float(p.unrealized_pl),
+        "unrealized_plpc": float(getattr(p, "unrealized_plpc", 0) or 0),
+    }
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def fetch_account_snapshot() -> dict:
+    """Cached Alpaca account + positions (no unused portfolio history)."""
     try:
         client = get_trading_client()
         summary = get_account_summary(client)
-        equity = summary["equity"]
-        cash = summary["cash"]
-        last_equity = summary.get("last_equity", equity)
-        positions = get_open_positions(client)
-        history = None
-        try:
-            history = get_portfolio_history(client)
-        except Exception:
-            pass
-        return client, equity, cash, last_equity, positions, history, None
+        positions = [_serialize_position(p) for p in get_open_positions(client)]
+        return {
+            "equity": summary["equity"],
+            "cash": summary["cash"],
+            "last_equity": summary.get("last_equity", summary["equity"]),
+            "positions": positions,
+            "error": None,
+        }
     except Exception as e:
-        return None, 0.0, 0.0, 0.0, [], None, str(e)
+        return {
+            "equity": 0.0,
+            "cash": 0.0,
+            "last_equity": 0.0,
+            "positions": [],
+            "error": str(e),
+        }
 
 
 def load_runner_status() -> dict | None:
@@ -192,6 +209,69 @@ def render_holdings(positions, equity, cash):
             '<div class="cc-empty">No open positions — holdings pie will appear here once you hold stock.</div>',
             unsafe_allow_html=True,
         )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _fmt_money(value: float, signed: bool = False) -> str:
+    if signed:
+        sign = "+" if value >= 0 else "-"
+        return f"{sign}$ {abs(value):,.2f}"
+    if value < 0:
+        return f"-$ {abs(value):,.2f}"
+    return f"$ {value:,.2f}"
+
+
+def _fmt_qty(qty: float) -> str:
+    if abs(qty - round(qty)) < 1e-9:
+        return f"{int(round(qty))}"
+    return f"{qty:,.4f}".rstrip("0").rstrip(".")
+
+
+def render_top_positions(positions, equity: float):
+    st.markdown(
+        '<div class="cc-section">'
+        '<div class="cc-section-title">Top Positions</div>'
+        '<div class="cc-section-sub">Open holdings by market value</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="cc-card">', unsafe_allow_html=True)
+
+    rows = positions_table_data(positions, equity)
+    if not rows:
+        st.markdown(
+            '<div class="cc-empty">No open positions.</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    body = ""
+    for r in rows:
+        pl_class = "cc-pos-pl-pos" if r["pl"] >= 0 else "cc-pos-pl-neg"
+        body += (
+            "<tr>"
+            f'<td class="asset">{r["symbol"]}</td>'
+            f'<td class="num">{_fmt_money(r["price"])}</td>'
+            f'<td class="num">{_fmt_qty(r["qty"])}</td>'
+            f'<td class="num">{_fmt_money(r["value"])}</td>'
+            f'<td class="num {pl_class}">{_fmt_money(r["pl"], signed=True)}</td>'
+            "</tr>"
+        )
+
+    st.markdown(
+        '<table class="cc-pos-table">'
+        "<thead><tr>"
+        "<th>Asset</th>"
+        '<th class="num">Price</th>'
+        '<th class="num">Qty</th>'
+        '<th class="num">Market Value</th>'
+        '<th class="num">Total P/L ($)</th>'
+        "</tr></thead>"
+        f"<tbody>{body}</tbody>"
+        "</table>",
+        unsafe_allow_html=True,
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -346,7 +426,11 @@ def render_orders():
 
 def main():
     mode_label = "PAPER" if config.ALPACA_PAPER else "LIVE"
-    _, equity, cash, _, positions, _, error = fetch_account_data()
+    snapshot = fetch_account_snapshot()
+    equity = snapshot["equity"]
+    cash = snapshot["cash"]
+    positions = snapshot["positions"]
+    error = snapshot["error"]
     runner_status = load_runner_status()
 
     render_header(mode_label)
@@ -356,6 +440,7 @@ def main():
 
     render_metric_strip(cash, equity, positions, runner_status, mode_label)
     render_holdings(positions, equity, cash)
+    render_top_positions(positions, equity)
     render_runner(runner_status)
     render_decisions()
     render_orders()

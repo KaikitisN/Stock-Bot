@@ -227,7 +227,18 @@ def wait_until_next_run(next_run_at: datetime):
         time.sleep(min(remaining, 30))
 
 
+def _lower_process_priority():
+    """Yield CPU to Streamlit / other services on small shared servers."""
+    if hasattr(os, "nice"):
+        try:
+            os.nice(10)
+            logger.info("Lowered process priority (nice +10)")
+        except Exception as e:
+            logger.warning(f"Could not lower process priority: {e}")
+
+
 if __name__ == "__main__":
+    _lower_process_priority()
     logger.info(
         f"Starting background runner. Interval={RUN_INTERVAL_MINUTES} min, "
         f"Provider={PROVIDER_NAME}, Symbols={len(config.DEFAULT_SYMBOLS)}"

@@ -198,6 +198,50 @@ html, body, [class*="css"], .stApp, .stMarkdown, .stText {
     padding: 0.75rem 0;
 }
 
+/* Top Positions table */
+.cc-pos-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+.cc-pos-table th {
+    text-align: left;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cc-faint);
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid var(--cc-border-subtle);
+}
+
+.cc-pos-table th.num,
+.cc-pos-table td.num {
+    text-align: right;
+}
+
+.cc-pos-table td {
+    padding: 0.7rem 0.65rem;
+    font-size: 0.875rem;
+    color: var(--cc-ink);
+    border-bottom: 1px solid var(--cc-border-subtle);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.cc-pos-table td.asset {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 600;
+    color: var(--cc-amber);
+}
+
+.cc-pos-table tr:last-child td {
+    border-bottom: none;
+}
+
+.cc-pos-pl-pos { color: var(--cc-beat); }
+.cc-pos-pl-neg { color: var(--cc-miss); }
+
 /* Streamlit overrides */
 div[data-testid="stMetric"] {
     background: var(--cc-card);

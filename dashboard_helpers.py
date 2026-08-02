@@ -21,6 +21,13 @@ def _chart_layout(**overrides) -> dict:
     return layout
 
 
+def _pos_field(p, key: str, default=None):
+    """Read a field from an Alpaca position object or a serialized dict."""
+    if isinstance(p, dict):
+        return p.get(key, default)
+    return getattr(p, key, default)
+
+
 def portfolio_allocation(positions, equity: float, cash: float) -> tuple[list[dict], float]:
     """Build donut-chart segments from open positions + cash.
 
@@ -29,13 +36,17 @@ def portfolio_allocation(positions, equity: float, cash: float) -> tuple[list[di
     """
     segments = []
     for p in positions:
-        market_value = float(p.market_value) if hasattr(p, "market_value") else float(p.qty) * float(p.current_price)
+        qty = float(_pos_field(p, "qty") or 0)
+        price = float(_pos_field(p, "current_price") or 0)
+        raw_mv = _pos_field(p, "market_value")
+        market_value = float(raw_mv) if raw_mv is not None else qty * price
+        symbol = str(_pos_field(p, "symbol") or "")
         segments.append({
-            "label": p.symbol,
+            "label": symbol,
             "value": abs(market_value),
             "display_value": market_value,
-            "qty": float(p.qty),
-            "color": symbol_color(p.symbol),
+            "qty": qty,
+            "color": symbol_color(symbol),
         })
 
     if cash != 0:
@@ -111,7 +122,9 @@ def compute_pl_periods(
         result["30D"] = equity - eq_30d if eq_30d is not None else result["7D"]
         result["ALL"] = equity - eq_first
     else:
-        total_unrealized = sum(float(p.unrealized_pl) for p in positions) if positions else 0.0
+        total_unrealized = sum(
+            float(_pos_field(p, "unrealized_pl") or 0) for p in positions
+        ) if positions else 0.0
         result["7D"] = result["24H"]
         result["30D"] = result["24H"]
         result["ALL"] = total_unrealized
@@ -203,21 +216,26 @@ def build_sparkline(prices: list[float], color: str = "#3b82f6") -> go.Figure:
 def positions_table_data(positions, equity: float) -> list[dict]:
     rows = []
     for p in positions:
-        value = float(p.market_value) if hasattr(p, "market_value") else float(p.qty) * float(p.current_price)
-        pl = float(p.unrealized_pl)
-        pl_pct = float(p.unrealized_plpc) * 100 if hasattr(p, "unrealized_plpc") else 0
+        qty = float(_pos_field(p, "qty") or 0)
+        price = float(_pos_field(p, "current_price") or 0)
+        raw_mv = _pos_field(p, "market_value")
+        value = float(raw_mv) if raw_mv is not None else qty * price
+        pl = float(_pos_field(p, "unrealized_pl") or 0)
+        raw_plpc = _pos_field(p, "unrealized_plpc")
+        pl_pct = float(raw_plpc or 0) * 100
         rows.append({
-            "symbol": p.symbol,
+            "symbol": str(_pos_field(p, "symbol") or ""),
             "exchange": "Alpaca",
-            "qty": float(p.qty),
+            "qty": qty,
             "value": value,
             "pl": pl,
             "pl_pct": pl_pct,
-            "price": float(p.current_price),
+            "price": price,
         })
     denom = abs(equity) or sum(abs(r["value"]) for r in rows) or 1
     for r in rows:
         r["allocation"] = abs(r["value"]) / denom * 100
+    rows.sort(key=lambda r: abs(r["value"]), reverse=True)
     return rows
 
 
