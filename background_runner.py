@@ -13,8 +13,19 @@ from datetime import datetime, timedelta, timezone
 import config
 from data_fetcher import get_market_snapshot
 from executor import get_trading_client
-from orchestrator import is_stock_market_open, process_symbol
-from risk_manager import get_account_equity, is_trading_halted
+from orchestrator import (
+    execute_plan,
+    evaluate_symbol,
+    is_stock_market_open,
+    log_decision,
+)
+from portfolio_allocator import allocate, exposure_budget
+from risk_manager import (
+    count_open_positions,
+    get_account_equity,
+    get_portfolio_state,
+    is_trading_halted,
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -55,7 +66,69 @@ def _base_running_status(total: int, started_at: str) -> dict:
         "next_run_at": None,
         "interval_minutes": RUN_INTERVAL_MINUTES,
         "progress_pct": 0,
+        "phase": "evaluating",
     }
+
+
+def _allocate_and_execute(trading_client, candidates, total, started_at):
+    """Close exiting positions, then fund entries in conviction order."""
+    if not candidates:
+        return
+
+    write_status({
+        **_base_running_status(total, started_at),
+        "phase": "allocating",
+        "current_symbol": "placing orders…",
+        "progress_pct": 100,
+    })
+
+    sizing = config.SIZING
+    closing = [c for c in candidates if c["closing"]]
+    entries = [c for c in candidates if not c["closing"]]
+
+    for plan in closing:
+        decision = execute_plan(trading_client, plan, RISK_CFG, sizing)
+        logger.info(f"  {plan['symbol']}: CLOSE submitted={decision['trade_submitted']}")
+
+    if not entries:
+        return
+
+    state = get_portfolio_state(trading_client)
+    budget = exposure_budget(
+        equity=state["equity"],
+        long_market_value=state["long_market_value"],
+        short_market_value=state["short_market_value"],
+        cash=state["cash"],
+        sizing=sizing,
+    )
+    logger.info(
+        f"Allocating ${budget:,.2f} across {len(entries)} candidates "
+        f"(equity ${state['equity']:,.2f}, cash ${state['cash']:,.2f})"
+    )
+
+    plans = allocate(
+        entries,
+        equity=state["equity"],
+        cash=state["cash"],
+        budget=budget,
+        open_positions=count_open_positions(trading_client),
+        max_open_positions=config.MAX_OPEN_POSITIONS,
+        sizing=sizing,
+    )
+
+    for plan in plans:
+        if plan["funded"]:
+            decision = execute_plan(trading_client, plan, RISK_CFG, sizing)
+            logger.info(
+                f"  {plan['symbol']}: {plan['action']} qty={plan['qty']} "
+                f"${plan['dollars']:,.2f} ({plan['weight_pct']:.1f}% of equity, "
+                f"{plan['binding']} binding) submitted={decision['trade_submitted']}"
+            )
+        else:
+            decision = plan["decision"]
+            decision["error"] = plan["rejected_reason"]
+            log_decision(decision)
+            logger.info(f"  {plan['symbol']}: unfunded — {plan['rejected_reason']}")
 
 
 def job() -> bool:
@@ -130,6 +203,7 @@ def job() -> bool:
             snapshot_items = list(snapshot.items())
             work_total = max(len(snapshot_items), 1)
 
+            candidates = []
             for i, (symbol, market_data) in enumerate(snapshot_items, start=1):
                 write_status({
                     **_base_running_status(total, started_at),
@@ -142,22 +216,22 @@ def job() -> bool:
                 })
                 logger.info(f"Analyzing {symbol} ({i}/{len(snapshot_items)})...")
 
-                decision, cash = process_symbol(
+                decision, candidate = evaluate_symbol(
                     trading_client,
                     symbol,
                     market_data,
                     PROVIDER_NAME,
                     USE_NEWS,
-                    RISK_CFG,
-                    cash,
                     trading_halted=halted,
                     halt_reason=halt_reason,
                 )
                 results.append(decision)
+                if candidate is not None:
+                    candidates.append(candidate)
                 logger.info(
                     f"  {symbol}: {decision.get('action')} "
-                    f"(confidence={decision.get('confidence')}) "
-                    f"submitted={decision.get('trade_submitted')}"
+                    f"(confidence={decision.get('confidence')}, "
+                    f"conviction={decision.get('conviction')})"
                 )
 
                 write_status({
@@ -169,6 +243,8 @@ def job() -> bool:
                     "last_completed_symbol": symbol,
                     "last_result": decision,
                 })
+
+            _allocate_and_execute(trading_client, candidates, total, started_at)
 
         finished_at = utc_now()
         next_at = finished_at + timedelta(minutes=RUN_INTERVAL_MINUTES)
