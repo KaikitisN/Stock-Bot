@@ -24,28 +24,22 @@ def get_account_summary(trading_client) -> dict:
     }
 
 
+def get_portfolio_state(trading_client) -> dict:
+    """Equity, cash and current market exposure on both sides of the book."""
+    account = trading_client.get_account()
+    return {
+        "equity": float(account.equity),
+        "cash": float(account.cash),
+        "long_market_value": float(getattr(account, "long_market_value", 0.0) or 0.0),
+        "short_market_value": float(getattr(account, "short_market_value", 0.0) or 0.0),
+    }
+
+
 def count_open_positions(trading_client) -> int:
     try:
         return len(trading_client.get_all_positions())
     except Exception:
         return 0
-
-
-def calc_position_size(cash: float, price: float, max_position_pct: float):
-    """Returns position size capped at max_position_pct of cash.
-
-    For stocks (price >= $1): returns whole shares (int).
-    For crypto with fractional prices (price < $1): returns a fractional
-    quantity rounded to 8 decimal places, as Alpaca supports fractional
-    crypto orders.
-    """
-    if price <= 0 or cash <= 0:
-        return 0
-    max_dollar_amount = cash * (max_position_pct / 100)
-    raw_qty = max_dollar_amount / price
-    if price >= 1.0:
-        return max(int(raw_qty), 0)
-    return round(raw_qty, 2)
 
 
 def check_daily_loss_limit(trading_client, day_start_equity, max_daily_loss_pct):
@@ -130,3 +124,45 @@ def stop_loss_take_profit_prices(entry_price, stop_loss_pct, take_profit_pct, si
         stop_price = round(entry_price * (1 - stop_loss_pct / 100), 8)
         target_price = round(entry_price * (1 + take_profit_pct / 100), 8)
     return stop_price, target_price
+
+
+def atr_stop_take_profit_prices(entry_price, atr, sizing: dict, side="BUY"):
+    """Volatility-scaled stop and target. Returns None when ATR is unusable.
+
+    A flat percentage stop is simultaneously too tight for crypto and too loose
+    for low-volatility names; ATR adapts the distance to how much the symbol
+    actually moves.
+    """
+    if not atr or atr <= 0 or entry_price <= 0:
+        return None
+
+    stop_distance = sizing["atr_stop_multiple"] * atr
+    target_distance = sizing["atr_target_multiple"] * atr
+
+    if stop_distance >= entry_price:
+        return None
+
+    side = side.upper()
+    if side == "SELL":
+        stop_price = round(entry_price + stop_distance, 8)
+        target_price = round(entry_price - target_distance, 8)
+        if target_price <= 0:
+            return None
+    else:
+        stop_price = round(entry_price - stop_distance, 8)
+        target_price = round(entry_price + target_distance, 8)
+
+    return stop_price, target_price
+
+
+def stop_target_for(entry_price, atr, sizing: dict, risk_cfg: dict, side="BUY"):
+    """ATR-based stop and target, falling back to fixed percentages."""
+    prices = atr_stop_take_profit_prices(entry_price, atr, sizing, side)
+    if prices is not None:
+        return prices
+    return stop_loss_take_profit_prices(
+        entry_price,
+        risk_cfg["stop_loss_pct"],
+        risk_cfg["take_profit_pct"],
+        side,
+    )
