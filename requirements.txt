@@ -22,3 +22,6 @@ transformers>=4.40.0
 einops>=0.7.0
 numpy>=1.26.0
 streamlit-autorefresh>=1.0.1
+
+# Testing
+pytest>=8.0.0

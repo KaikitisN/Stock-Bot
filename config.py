@@ -35,7 +35,7 @@ KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "2.
 
 # --- Trade quality gates ---
 MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "70"))
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "5"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "12"))
 USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
 ALLOW_SHORT_SELLING = os.getenv("ALLOW_SHORT_SELLING", "false").lower() == "true"
 
@@ -66,6 +66,37 @@ DEFAULT_RISK = {
     "take_profit_pct": 6.0,
     "max_daily_loss_pct": 3.0,
 }
+
+
+def _env_float(key: str, default: float) -> float:
+    """Read a float from the environment, falling back on missing or malformed values."""
+    try:
+        return float(os.getenv(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+# --- Position sizing (all % of account EQUITY, never of cash) ---
+# Sizing scales with forecast conviction (mu/sigma from Kronos sample paths),
+# bounded independently by an ATR risk budget. See
+# docs/superpowers/specs/2026-08-12-confidence-weighted-position-sizing-design.md
+SIZING = {
+    # Total deployed capital target across the whole book.
+    "target_exposure_pct": _env_float("TARGET_EXPOSURE_PCT", 65.0),
+    # Candidates sizing below this are rejected outright, never shrunk.
+    "min_position_pct": _env_float("MIN_POSITION_PCT", 2.0),
+    "max_position_pct": _env_float("MAX_POSITION_PCT", 12.0),
+    # Equity risked per trade at the ATR stop.
+    "risk_per_trade_pct": _env_float("RISK_PER_TRADE_PCT", 0.5),
+    "atr_stop_multiple": _env_float("ATR_STOP_MULTIPLE", 2.0),
+    "atr_target_multiple": _env_float("ATR_TARGET_MULTIPLE", 4.0),
+    # conviction value at which max_position_pct is reached.
+    "ir_saturation": _env_float("IR_SATURATION", 1.0),
+    "min_information_ratio": _env_float("MIN_INFORMATION_RATIO", 0.2),
+}
+
+# Independent Kronos sample paths drawn per symbol to measure forecast dispersion.
+KRONOS_SAMPLE_PATHS = int(os.getenv("KRONOS_SAMPLE_PATHS", "30"))
 
 # --- Display ---
 # Timezone for dashboard timestamps (IANA name). Falls back to UTC if invalid.
