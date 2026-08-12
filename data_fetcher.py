@@ -76,8 +76,17 @@ def fetch_bars(symbols, lookback_days=10, timeframe=TimeFrame.Hour):
     return pd.concat(frames)
 
 
+def _true_range(df):
+    """True range: the largest of the intrabar range and the two gap distances."""
+    prev_close = df["close"].shift(1)
+    high_low = df["high"] - df["low"]
+    high_prev_close = (df["high"] - prev_close).abs()
+    low_prev_close = (df["low"] - prev_close).abs()
+    return pd.concat([high_low, high_prev_close, low_prev_close], axis=1).max(axis=1)
+
+
 def compute_indicators(df):
-    """Adds SMA-10, SMA-30 and RSI-14 to a single-symbol OHLCV dataframe."""
+    """Adds SMA-10, SMA-30, RSI-14 and ATR-14 to a single-symbol OHLCV dataframe."""
     df = df.copy()
     df["sma_10"] = df["close"].rolling(10).mean()
     df["sma_30"] = df["close"].rolling(30).mean()
@@ -86,6 +95,7 @@ def compute_indicators(df):
     loss = -delta.clip(upper=0).rolling(14).mean()
     rs = gain / loss.replace(0, 1e-9)
     df["rsi_14"] = 100 - (100 / (1 + rs))
+    df["atr_14"] = _true_range(df).rolling(14).mean()
     return df
 
 
@@ -105,6 +115,7 @@ def get_market_snapshot(symbols, timeframe=TimeFrame.Hour):
             "sma_10": _smart_round(float(last["sma_10"])) if pd.notna(last["sma_10"]) else None,
             "sma_30": _smart_round(float(last["sma_30"])) if pd.notna(last["sma_30"]) else None,
             "rsi_14": round(float(last["rsi_14"]), 1) if pd.notna(last["rsi_14"]) else None,
+            "atr_14": _smart_round(float(last["atr_14"])) if pd.notna(last["atr_14"]) else None,
         }
     return snapshot
 
