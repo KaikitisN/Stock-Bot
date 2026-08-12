@@ -8,13 +8,14 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 import config
-from dashboard_helpers import build_donut_chart, portfolio_allocation, positions_table_data
+from dashboard_helpers import build_donut_svg, portfolio_allocation, positions_table_data
 from dashboard_theme import inject_theme
 from executor import get_open_positions, get_trading_client
 from risk_manager import get_account_summary
+
+REFRESH_SECONDS = 45
 
 st.set_page_config(
     page_title="Trading Command Center",
@@ -22,7 +23,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 inject_theme()
-st_autorefresh(interval=45000, key="dashboard_autorefresh")
 
 
 def read_csv_with_fallback(path: str) -> pd.DataFrame:
@@ -82,7 +82,9 @@ def _serialize_position(p) -> dict:
     }
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+# TTL sits just under the refresh interval so each refresh gets fresh figures
+# instead of alternating between a live call and a still-valid cache entry.
+@st.cache_data(ttl=REFRESH_SECONDS - 5, show_spinner=False)
 def fetch_account_snapshot() -> dict:
     """Cached Alpaca account + positions (no unused portfolio history)."""
     try:
@@ -186,10 +188,9 @@ def render_holdings(positions, equity, cash):
     if holdings:
         left, right = st.columns([1.1, 1])
         with left:
-            st.plotly_chart(
-                build_donut_chart(holdings, sum(s["value"] for s in holdings)),
-                width="stretch",
-                config={"displayModeBar": False},
+            st.markdown(
+                build_donut_svg(holdings, sum(s["value"] for s in holdings)),
+                unsafe_allow_html=True,
             )
         with right:
             legend_html = ""
@@ -426,7 +427,11 @@ def render_orders():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def main():
+# Everything live sits in one fragment so a refresh reruns only this function.
+# The previous st_autorefresh reran the whole script, re-executing module setup
+# and rebuilding the entire page for the browser every 45 seconds.
+@st.fragment(run_every=REFRESH_SECONDS)
+def render_live():
     mode_label = "PAPER" if config.ALPACA_PAPER else "LIVE"
     snapshot = fetch_account_snapshot()
     equity = snapshot["equity"]
@@ -446,6 +451,10 @@ def main():
     render_runner(runner_status)
     render_decisions()
     render_orders()
+
+
+def main():
+    render_live()
 
 
 if __name__ == "__main__":

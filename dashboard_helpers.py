@@ -1,5 +1,8 @@
 """Data helpers and chart builders for the AIBots-style dashboard."""
 
+import math
+from html import escape
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -65,33 +68,62 @@ def portfolio_allocation(positions, equity: float, cash: float) -> tuple[list[di
     return segments, equity
 
 
-def build_donut_chart(segments: list[dict], total: float) -> go.Figure:
-    labels = [s["label"] for s in segments] or ["No holdings"]
-    values = [s["value"] for s in segments] or [1]
-    colors = [s["color"] for s in segments] or ["#64748b"]
+# Geometry for the donut, in viewBox units. r=42 with a 16-wide stroke puts the
+# inner edge at 34, reproducing the 0.68 hole ratio of the chart this replaced.
+_DONUT_RADIUS = 42.0
+_DONUT_STROKE = 16.0
+_DONUT_CIRCUMFERENCE = 2 * math.pi * _DONUT_RADIUS
+# Arc length erased between slices to read as a separator rather than a seam.
+_DONUT_GAP = 1.6
 
-    fig = go.Figure(data=[go.Pie(
-        labels=labels,
-        values=values,
-        hole=0.68,
-        marker=dict(colors=colors, line=dict(color="#0c0d10", width=2)),
-        textinfo="none",
-        hovertemplate="%{label}<br>$%{value:,.2f} (%{percent})<extra></extra>",
-    )])
-    fig.update_layout(
-        **_chart_layout(
-            showlegend=False,
-            height=280,
-            annotations=[dict(
-                text=(
-                    f"<b>$ {total:,.2f}</b><br>"
-                    f"<span style='font-size:11px;color:#71717a'>Holdings</span>"
-                ),
-                x=0.5, y=0.5, font_size=14, showarrow=False, font_color="#f4f4f5",
-            )],
-        ),
+
+def build_donut_svg(segments: list[dict], total: float) -> str:
+    """Render the holdings donut as inline SVG.
+
+    Deliberately not a Plotly figure: a single st.plotly_chart call makes the
+    browser download a 4.5 MB JS chunk, which dominates first-page load on a
+    small VM. This costs nothing beyond the markup itself.
+    """
+    drawn = [s for s in segments if s["value"] > 0]
+    gross = sum(s["value"] for s in drawn)
+
+    if not drawn or gross <= 0:
+        arcs = (
+            f'<circle cx="50" cy="50" r="{_DONUT_RADIUS}" fill="none" '
+            f'stroke="#27272a" stroke-width="{_DONUT_STROKE}" />'
+        )
+    else:
+        # A lone holding gets a continuous ring; a gap there is just a nick.
+        gap = _DONUT_GAP if len(drawn) > 1 else 0.0
+        arcs = ""
+        offset = 0.0
+        for s in drawn:
+            arc = s["value"] / gross * _DONUT_CIRCUMFERENCE
+            visible = max(arc - gap, 0.4)
+            pct = s["value"] / gross * 100
+            arcs += (
+                f'<circle cx="50" cy="50" r="{_DONUT_RADIUS}" fill="none" '
+                f'stroke="{s["color"]}" stroke-width="{_DONUT_STROKE}" '
+                f'stroke-dasharray="{visible:.3f} {_DONUT_CIRCUMFERENCE - visible:.3f}" '
+                f'stroke-dashoffset="{-offset:.3f}">'
+                f'<title>{escape(str(s["label"]))} — '
+                f'$ {s["value"]:,.2f} ({pct:.1f}%)</title>'
+                f"</circle>"
+            )
+            offset += arc
+
+    return (
+        '<div class="cc-donut">'
+        '<svg viewBox="0 0 100 100" role="img" '
+        f'aria-label="Holdings allocation totalling ${total:,.2f}">'
+        # Rotate so the first slice starts at 12 o'clock instead of 3.
+        f'<g transform="rotate(-90 50 50)">{arcs}</g>'
+        '<text class="cc-donut-total" x="50" y="49.5" text-anchor="middle">'
+        f"$ {total:,.2f}</text>"
+        '<text class="cc-donut-caption" x="50" y="56" text-anchor="middle">'
+        "Holdings</text>"
+        "</svg></div>"
     )
-    return fig
 
 
 def _equity_at_offset(equity_series: list[float], days_ago: int) -> float | None:

@@ -72,6 +72,13 @@ def _get_predictor():
             f"Run: pip install -r {KRONOS_REPO_PATH}/requirements.txt"
         )
 
+    # Torch grabs every core by default. On a small shared-core VM that starves
+    # the dashboard process for the whole inference cycle, so the thread count
+    # is capped rather than left to the machine.
+    torch_threads = getattr(config, "TORCH_NUM_THREADS", 1)
+    if torch_threads > 0:
+        torch.set_num_threads(torch_threads)
+
     model_map = {
         "mini":  "NeoQuasar/Kronos-mini",
         "small": "NeoQuasar/Kronos-small",

@@ -98,6 +98,10 @@ SIZING = {
 # Independent Kronos sample paths drawn per symbol to measure forecast dispersion.
 KRONOS_SAMPLE_PATHS = int(os.getenv("KRONOS_SAMPLE_PATHS", "30"))
 
+# CPU threads Torch may use for inference. Defaults to 1 so a shared-core VM
+# keeps enough headroom to serve the dashboard. Set 0 to let Torch decide.
+TORCH_NUM_THREADS = int(os.getenv("TORCH_NUM_THREADS", "1"))
+
 # --- Display ---
 # Timezone for dashboard timestamps (IANA name). Falls back to UTC if invalid.
 DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "Europe/Athens")

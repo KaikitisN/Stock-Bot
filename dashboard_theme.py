@@ -175,6 +175,43 @@ html, body, [class*="css"], .stApp, .stMarkdown, .stText {
     padding: 1.1rem 1.2rem;
 }
 
+/* Holdings donut (inline SVG) */
+.cc-donut {
+    width: 100%;
+    max-width: 280px;
+    margin: 0 auto;
+}
+
+.cc-donut svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+.cc-donut circle[stroke-dasharray] {
+    transition: opacity 0.15s ease;
+}
+
+.cc-donut circle[stroke-dasharray]:hover {
+    opacity: 0.78;
+}
+
+.cc-donut-total {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 5px;
+    font-weight: 600;
+    fill: var(--cc-ink);
+}
+
+.cc-donut-caption {
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    font-size: 3.6px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    fill: var(--cc-faint);
+}
+
 .cc-legend-item {
     display: flex;
     align-items: center;
