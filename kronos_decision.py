@@ -14,6 +14,7 @@ import os
 import pandas as pd
 
 import config  # needed for KRONOS_SIGNAL_THRESHOLD_PCT
+from forecast_stats import summarize
 
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
@@ -99,6 +100,7 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
         return {
             "symbol": symbol, "action": "HOLD", "confidence": 0,
             "reason": str(e), "provider": "Kronos (Local)",
+            "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
 
     input_df = bars_df[["open", "high", "low", "close", "volume"]].tail(200).copy()
@@ -109,6 +111,7 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "symbol": symbol, "action": "HOLD", "confidence": 0,
             "reason": "Kronos input is missing timestamps; expected a DatetimeIndex or a timestamp column.",
             "provider": "Kronos (Local)",
+            "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
 
     y_timestamp = _make_future_timestamps(x_timestamp, pred_len=10)
@@ -118,50 +121,81 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "symbol": symbol, "action": "HOLD", "confidence": 0,
             "reason": f"Not enough bars ({len(input_df)} < 60 required).",
             "provider": "Kronos (Local)",
+            "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
 
     try:
-        predictions = predictor.predict(
-            df=input_df,
-            x_timestamp=x_timestamp,
-            y_timestamp=y_timestamp,
+        n_paths = getattr(config, "KRONOS_SAMPLE_PATHS", 30)
+
+        # One series per path with sample_count=1 gives K independent futures in
+        # a single batched pass. sample_count > 1 would make Kronos average the
+        # paths internally (model/kronos.py:465-467), which is exactly the
+        # dispersion we need to measure.
+        path_dfs = predictor.predict_batch(
+            df_list=[input_df] * n_paths,
+            x_timestamp_list=[x_timestamp] * n_paths,
+            y_timestamp_list=[y_timestamp] * n_paths,
             pred_len=10,
             T=1.0,
             top_p=0.9,
-            sample_count=50,
+            sample_count=1,
             verbose=False,
         )
 
         last_close = float(input_df["close"].iloc[-1])
-        median_forecast = float(predictions["close"].median())
-        p10 = float(predictions["close"].quantile(0.10))   # bearish scenario
-        p90 = float(predictions["close"].quantile(0.90))   # bullish scenario
-        pct_change = (median_forecast - last_close) / last_close * 100
+        returns = [
+            (float(path["close"].iloc[-1]) - last_close) / last_close
+            for path in path_dfs
+        ]
+        stats = summarize(returns)
 
+        if stats is None:
+            return {
+                "symbol": symbol, "action": "HOLD", "confidence": 0,
+                "reason": (
+                    f"Too few usable forecast paths ({len(returns)}); "
+                    "dispersion is undefined."
+                ),
+                "provider": f"Kronos (Local / {KRONOS_MODEL_SIZE})",
+                "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
+            }
+
+        mu_pct = stats["mu"] * 100
+        sigma_pct = stats["sigma"] * 100
         signal_threshold = getattr(config, "KRONOS_SIGNAL_THRESHOLD_PCT", 2.5)
         min_confidence = getattr(config, "MIN_TRADE_CONFIDENCE", 70)
 
-        if pct_change > signal_threshold:
+        if mu_pct > signal_threshold:
             action = "BUY"
-            confidence = min(int(60 + pct_change * 8), 95)
-        elif pct_change < -signal_threshold:
+            confidence = round(100 * stats["p_up"])
+        elif mu_pct < -signal_threshold:
             action = "SELL"
-            confidence = min(int(60 + abs(pct_change) * 8), 95)
+            confidence = round(100 * (1 - stats["p_up"]))
         else:
             action = "HOLD"
-            confidence = min(int(40 + abs(pct_change) * 5), min_confidence - 1)
+            agreement = round(100 * max(stats["p_up"], 1 - stats["p_up"]))
+            confidence = min(agreement, min_confidence - 1)
 
+        expected_close = last_close * (1 + stats["mu"])
         return {
             "symbol": symbol,
             "action": action,
             "confidence": confidence,
             "reason": (
-                f"Kronos ({KRONOS_MODEL_SIZE}) forecasts close at "
-                f"${median_forecast:.2f} (now: ${last_close:.2f}, {pct_change:+.2f}%). "
-                f"Signal threshold: {signal_threshold:.2f}%. "
-                f"80% range: ${p10:.2f}\u2013${p90:.2f}"
+                f"Kronos ({KRONOS_MODEL_SIZE}) expects ${expected_close:.2f} "
+                f"(now: ${last_close:.2f}, {mu_pct:+.2f}%) across "
+                f"{stats['n_paths']} paths. "
+                f"Dispersion {sigma_pct:.2f}%, conviction {stats['conviction']:.2f}, "
+                f"{round(100 * stats['p_up'])}% of paths up. "
+                f"80% of paths land between {stats['p10'] * 100:+.2f}% and "
+                f"{stats['p90'] * 100:+.2f}%. "
+                f"Signal threshold: {signal_threshold:.2f}%"
             ),
             "provider": f"Kronos (Local / {KRONOS_MODEL_SIZE})",
+            "mu_pct": round(mu_pct, 4),
+            "sigma_pct": round(sigma_pct, 4),
+            "conviction": round(stats["conviction"], 4),
+            "p_up": stats["p_up"],
         }
 
     except Exception as e:
@@ -169,4 +203,5 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "symbol": symbol, "action": "HOLD", "confidence": 0,
             "reason": f"Kronos inference error: {e}",
             "provider": "Kronos (Local)",
+            "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
