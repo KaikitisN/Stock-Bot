@@ -9,6 +9,7 @@ REQUIRED_KEYS = {
     "atr_target_multiple",
     "ir_saturation",
     "min_information_ratio",
+    "rebalance_conviction_gap",
 }
 
 
@@ -22,14 +23,15 @@ def test_sizing_values_are_floats():
 
 
 def test_sizing_defaults_match_spec():
-    assert config.SIZING["target_exposure_pct"] == 65.0
-    assert config.SIZING["min_position_pct"] == 2.0
-    assert config.SIZING["max_position_pct"] == 12.0
+    assert config.SIZING["target_exposure_pct"] == 72.0
+    assert config.SIZING["min_position_pct"] == 1.5
+    assert config.SIZING["max_position_pct"] == 10.0
     assert config.SIZING["risk_per_trade_pct"] == 0.5
     assert config.SIZING["atr_stop_multiple"] == 2.0
     assert config.SIZING["atr_target_multiple"] == 4.0
     assert config.SIZING["ir_saturation"] == 1.0
     assert config.SIZING["min_information_ratio"] == 0.2
+    assert config.SIZING["rebalance_conviction_gap"] == 0.3
 
 
 def test_position_band_is_coherent():
@@ -37,7 +39,7 @@ def test_position_band_is_coherent():
 
 
 def test_max_open_positions_can_fill_the_exposure_target():
-    """At the 2% floor, 12 slots must be able to reach the 65% target."""
+    """At the max weight, 12 slots must be able to reach the exposure target."""
     max_reachable = config.MAX_OPEN_POSITIONS * config.SIZING["max_position_pct"]
     assert max_reachable >= config.SIZING["target_exposure_pct"]
 

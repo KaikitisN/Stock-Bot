@@ -4,7 +4,7 @@ schedules repeated calls at the interval you choose.
 """
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import config
 from data_fetcher import get_market_snapshot
@@ -18,8 +18,14 @@ from risk_manager import (
     count_open_positions,
 )
 from portfolio_allocator import allocate, exposure_budget
+from rebalance import (
+    holdings_from_positions,
+    latest_convictions,
+    propose_rebalance_closes,
+)
 from executor import (
     get_trading_client,
+    get_open_positions,
     submit_bracket_order,
     get_position_side,
     has_pending_order,
@@ -68,7 +74,7 @@ def _rotate_legacy_log(path: str):
         header = f.readline().strip()
     if header == ",".join(DECISION_FIELDS):
         return
-    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     base, ext = os.path.splitext(path)
     os.replace(path, f"{base}_legacy_{stamp}{ext}")
 
@@ -102,7 +108,7 @@ def evaluate_symbol(
     tradable this cycle; the decision has already been logged in that case.
     """
     decision = get_decision(symbol, market_data, provider_name, use_news)
-    decision["timestamp"] = datetime.utcnow().isoformat()
+    decision["timestamp"] = datetime.now(timezone.utc).isoformat()
     decision["trade_submitted"] = False
     decision["error"] = ""
 
@@ -156,6 +162,36 @@ def evaluate_symbol(
     return decision, candidate
 
 
+def plan_rebalance_closes(trading_client, entries, already_closing, sizing):
+    """Propose weak-holding closes so stronger entries can be funded."""
+    if not entries:
+        return []
+
+    state = get_portfolio_state(trading_client)
+    budget = exposure_budget(
+        equity=state["equity"],
+        long_market_value=state["long_market_value"],
+        short_market_value=state["short_market_value"],
+        cash=state["cash"],
+        sizing=sizing,
+    )
+    convictions = latest_convictions(config.DECISIONS_LOG)
+    holdings = holdings_from_positions(
+        get_open_positions(trading_client), convictions,
+    )
+    return propose_rebalance_closes(
+        entries,
+        holdings,
+        equity=state["equity"],
+        cash=state["cash"],
+        budget=budget,
+        open_positions=count_open_positions(trading_client),
+        max_open_positions=config.MAX_OPEN_POSITIONS,
+        sizing=sizing,
+        exclude_symbols=already_closing,
+    )
+
+
 def execute_plan(trading_client, plan, risk_cfg, sizing):
     """Submit one funded plan (or one full liquidation) and log the outcome."""
     decision = plan["decision"]
@@ -178,7 +214,7 @@ def execute_plan(trading_client, plan, risk_cfg, sizing):
             decision["notional"] = round(qty * price, 2)
             decision["weight_pct"] = round(plan.get("weight_pct", 0.0), 3)
             log_row(config.TRADES_LOG, {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "symbol": symbol,
                 "side": action,
                 "qty": qty,
@@ -193,6 +229,45 @@ def execute_plan(trading_client, plan, risk_cfg, sizing):
 
     log_decision(decision)
     return decision
+
+
+def fund_entries(trading_client, entries, risk_cfg, sizing, already_closing=()):
+    """Rebalance if needed, then allocate and submit funded entries."""
+    if not entries:
+        return []
+
+    for plan in plan_rebalance_closes(
+        trading_client, entries, set(already_closing), sizing,
+    ):
+        execute_plan(trading_client, plan, risk_cfg, sizing)
+
+    state = get_portfolio_state(trading_client)
+    budget = exposure_budget(
+        equity=state["equity"],
+        long_market_value=state["long_market_value"],
+        short_market_value=state["short_market_value"],
+        cash=state["cash"],
+        sizing=sizing,
+    )
+    plans = allocate(
+        entries,
+        equity=state["equity"],
+        cash=state["cash"],
+        budget=budget,
+        open_positions=count_open_positions(trading_client),
+        max_open_positions=config.MAX_OPEN_POSITIONS,
+        sizing=sizing,
+    )
+    results = []
+    for plan in plans:
+        if plan["funded"]:
+            results.append(execute_plan(trading_client, plan, risk_cfg, sizing))
+        else:
+            decision = plan["decision"]
+            decision["error"] = plan["rejected_reason"]
+            log_decision(decision)
+            results.append(decision)
+    return results
 
 
 def run_once(symbols, provider_name, use_news, risk_cfg):
@@ -214,7 +289,7 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
         results.append({
             "symbol": symbol, "action": "SKIPPED", "confidence": 0,
             "reason": "Stock market closed", "provider": provider_name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "trade_submitted": False, "error": "",
         })
 
@@ -231,38 +306,17 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
         if candidate is not None:
             candidates.append(candidate)
 
-    # Phase 2: liquidations first (they free capital), then ranked entries.
+    # Phase 2: signal liquidations, optional rebalance closes, then entries.
     closing = [c for c in candidates if c["closing"]]
     entries = [c for c in candidates if not c["closing"]]
 
     for plan in closing:
         execute_plan(trading_client, plan, risk_cfg, sizing)
 
-    if entries:
-        state = get_portfolio_state(trading_client)
-        budget = exposure_budget(
-            equity=state["equity"],
-            long_market_value=state["long_market_value"],
-            short_market_value=state["short_market_value"],
-            cash=state["cash"],
-            sizing=sizing,
-        )
-        plans = allocate(
-            entries,
-            equity=state["equity"],
-            cash=state["cash"],
-            budget=budget,
-            open_positions=count_open_positions(trading_client),
-            max_open_positions=config.MAX_OPEN_POSITIONS,
-            sizing=sizing,
-        )
-        for plan in plans:
-            if plan["funded"]:
-                execute_plan(trading_client, plan, risk_cfg, sizing)
-            else:
-                decision = plan["decision"]
-                decision["error"] = plan["rejected_reason"]
-                log_decision(decision)
+    fund_entries(
+        trading_client, entries, risk_cfg, sizing,
+        already_closing={c["symbol"] for c in closing},
+    )
 
     equity, cash = get_account_equity(trading_client)
     return results, equity, cash

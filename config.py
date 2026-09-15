@@ -82,10 +82,10 @@ def _env_float(key: str, default: float) -> float:
 # docs/superpowers/specs/2026-08-12-confidence-weighted-position-sizing-design.md
 SIZING = {
     # Total deployed capital target across the whole book.
-    "target_exposure_pct": _env_float("TARGET_EXPOSURE_PCT", 65.0),
+    "target_exposure_pct": _env_float("TARGET_EXPOSURE_PCT", 72.0),
     # Candidates sizing below this are rejected outright, never shrunk.
-    "min_position_pct": _env_float("MIN_POSITION_PCT", 2.0),
-    "max_position_pct": _env_float("MAX_POSITION_PCT", 12.0),
+    "min_position_pct": _env_float("MIN_POSITION_PCT", 1.5),
+    "max_position_pct": _env_float("MAX_POSITION_PCT", 10.0),
     # Equity risked per trade at the ATR stop.
     "risk_per_trade_pct": _env_float("RISK_PER_TRADE_PCT", 0.5),
     "atr_stop_multiple": _env_float("ATR_STOP_MULTIPLE", 2.0),
@@ -93,6 +93,8 @@ SIZING = {
     # conviction value at which max_position_pct is reached.
     "ir_saturation": _env_float("IR_SATURATION", 1.0),
     "min_information_ratio": _env_float("MIN_INFORMATION_RATIO", 0.2),
+    # New entry must beat a held name by at least this much to displace it.
+    "rebalance_conviction_gap": _env_float("REBALANCE_CONVICTION_GAP", 0.3),
 }
 
 # Independent Kronos sample paths drawn per symbol to measure forecast dispersion.
