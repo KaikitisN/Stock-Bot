@@ -16,10 +16,12 @@ from executor import get_trading_client
 from orchestrator import (
     execute_plan,
     evaluate_symbol,
-    fund_entries,
     is_stock_market_open,
+    log_decision,
 )
+from portfolio_allocator import allocate, exposure_budget
 from risk_manager import (
+    count_open_positions,
     get_account_equity,
     get_portfolio_state,
     is_trading_halted,
@@ -69,7 +71,7 @@ def _base_running_status(total: int, started_at: str) -> dict:
 
 
 def _allocate_and_execute(trading_client, candidates, total, started_at):
-    """Close exiting positions, rebalance if needed, then fund entries."""
+    """Close exiting positions, then fund entries in conviction order."""
     if not candidates:
         return
 
@@ -92,29 +94,42 @@ def _allocate_and_execute(trading_client, candidates, total, started_at):
         return
 
     state = get_portfolio_state(trading_client)
+    budget = exposure_budget(
+        equity=state["equity"],
+        long_market_value=state["long_market_value"],
+        short_market_value=state["short_market_value"],
+        cash=state["cash"],
+        sizing=sizing,
+    )
     logger.info(
-        f"Funding {len(entries)} candidates "
+        f"Allocating ${budget:,.2f} across {len(entries)} candidates "
         f"(equity ${state['equity']:,.2f}, cash ${state['cash']:,.2f})"
     )
 
-    results = fund_entries(
-        trading_client,
+    plans = allocate(
         entries,
-        RISK_CFG,
-        sizing,
-        already_closing={c["symbol"] for c in closing},
+        equity=state["equity"],
+        cash=state["cash"],
+        budget=budget,
+        open_positions=count_open_positions(trading_client),
+        max_open_positions=config.MAX_OPEN_POSITIONS,
+        sizing=sizing,
     )
-    for decision in results:
-        symbol = decision.get("symbol")
-        if decision.get("trade_submitted"):
+
+    for plan in plans:
+        if plan["funded"]:
+            decision = execute_plan(trading_client, plan, RISK_CFG, sizing)
             logger.info(
-                f"  {symbol}: {decision.get('action')} "
-                f"qty={decision.get('qty')} submitted=True"
+                f"  {plan['symbol']}: {plan['action']} qty={plan['qty']} "
+                f"${plan['dollars']:,.2f} ({plan['weight_pct']:.1f}% of equity, "
+                f"{plan['binding']} binding) submitted={decision['trade_submitted']}"
             )
         else:
-            logger.info(
-                f"  {symbol}: unfunded — {decision.get('error')}"
-            )
+            decision = plan["decision"]
+            decision["error"] = plan["rejected_reason"]
+            log_decision(decision)
+            logger.info(f"  {plan['symbol']}: unfunded — {plan['rejected_reason']}")
+
 
 def job() -> bool:
     """Run one trading cycle, updating per-symbol progress for the dashboard."""

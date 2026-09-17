@@ -7,7 +7,7 @@ Run before trusting a sizing change with real orders:
 import config
 from data_fetcher import get_market_snapshot
 from executor import get_trading_client
-from orchestrator import evaluate_symbol, is_stock_market_open, plan_rebalance_closes
+from orchestrator import evaluate_symbol, is_stock_market_open
 from portfolio_allocator import allocate, exposure_budget
 from risk_manager import count_open_positions, get_portfolio_state, stop_target_for
 
@@ -65,27 +65,12 @@ def main():
         print("No entry candidates.")
         return
 
-    already_closing = {c["symbol"] for c in closing}
-    rebals = plan_rebalance_closes(
-        trading_client, entries, already_closing, sizing,
-    )
-    print(
-        f"{len(rebals)} rebalance close(s): "
-        + (", ".join(f"{c['symbol']}→{c['for_symbol']}" for c in rebals) or "none")
-    )
-
-    # Simulate post-rebalance budget for the preview table.
-    freed = sum(c["dollars"] for c in rebals)
-    sim_budget = budget + freed
-    sim_cash = state["cash"] + freed
-    sim_open = max(open_positions - len(rebals), 0)
-
     plans = allocate(
         entries,
         equity=state["equity"],
-        cash=sim_cash,
-        budget=sim_budget,
-        open_positions=sim_open,
+        cash=state["cash"],
+        budget=budget,
+        open_positions=open_positions,
         max_open_positions=config.MAX_OPEN_POSITIONS,
         sizing=sizing,
     )
