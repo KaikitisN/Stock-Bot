@@ -51,6 +51,28 @@ def stub(monkeypatch):
     return _install
 
 
+def test_mini_pairs_with_tokenizer_2k():
+    model, tokenizer, max_context = kronos_decision._resolve_hub_ids("mini")
+    assert model == "NeoQuasar/Kronos-mini"
+    assert tokenizer == "NeoQuasar/Kronos-Tokenizer-2k"
+    assert max_context == 2048
+
+
+def test_small_and_base_pair_with_tokenizer_base():
+    for size in ("small", "base", "large"):
+        model, tokenizer, max_context = kronos_decision._resolve_hub_ids(size)
+        assert model.endswith(f"Kronos-{size}")
+        assert tokenizer == "NeoQuasar/Kronos-Tokenizer-base"
+        assert max_context == 512
+
+
+def test_unknown_model_size_falls_back_to_mini():
+    model, tokenizer, max_context = kronos_decision._resolve_hub_ids("not-a-size")
+    assert model == "NeoQuasar/Kronos-mini"
+    assert tokenizer == "NeoQuasar/Kronos-Tokenizer-2k"
+    assert max_context == 2048
+
+
 def test_sample_count_must_be_one_to_preserve_dispersion(stub):
     """sample_count > 1 makes Kronos average paths internally, destroying sigma."""
     predictor = stub([103.0] * 30)

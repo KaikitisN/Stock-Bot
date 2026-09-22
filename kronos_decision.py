@@ -21,6 +21,35 @@ KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 
 _predictor = None  # singleton — loaded once, reused every cycle
 
+# Official NeoQuasar pairings: mini uses Tokenizer-2k (ctx 2048);
+# small/base/large use Tokenizer-base (ctx 512).
+_MODEL_HUB = {
+    "mini":  "NeoQuasar/Kronos-mini",
+    "small": "NeoQuasar/Kronos-small",
+    "base":  "NeoQuasar/Kronos-base",
+    "large": "NeoQuasar/Kronos-large",
+}
+_TOKENIZER_HUB = {
+    "mini":  "NeoQuasar/Kronos-Tokenizer-2k",
+    "small": "NeoQuasar/Kronos-Tokenizer-base",
+    "base":  "NeoQuasar/Kronos-Tokenizer-base",
+    "large": "NeoQuasar/Kronos-Tokenizer-base",
+}
+_MAX_CONTEXT = {
+    "mini":  2048,
+    "small": 512,
+    "base":  512,
+    "large": 512,
+}
+
+
+def _resolve_hub_ids(model_size: str = None):
+    """Return (model_hub, tokenizer_hub, max_context) for a Kronos size."""
+    size = (model_size or KRONOS_MODEL_SIZE or "mini").lower()
+    if size not in _MODEL_HUB:
+        size = "mini"
+    return _MODEL_HUB[size], _TOKENIZER_HUB[size], _MAX_CONTEXT[size]
+
 
 def _get_timestamp_series(df: pd.DataFrame):
     if isinstance(df.index, pd.DatetimeIndex):
@@ -79,19 +108,13 @@ def _get_predictor():
     if torch_threads > 0:
         torch.set_num_threads(torch_threads)
 
-    model_map = {
-        "mini":  "NeoQuasar/Kronos-mini",
-        "small": "NeoQuasar/Kronos-small",
-        "base":  "NeoQuasar/Kronos-base",
-        "large": "NeoQuasar/Kronos-large",
-    }
-    hub_name = model_map.get(KRONOS_MODEL_SIZE, "NeoQuasar/Kronos-mini")
+    hub_name, tokenizer_hub, max_context = _resolve_hub_ids()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[Kronos] Loading {hub_name} on {device}...")
+    print(f"[Kronos] Loading {hub_name} + {tokenizer_hub} (ctx={max_context}) on {device}...")
 
-    tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
+    tokenizer = KronosTokenizer.from_pretrained(tokenizer_hub)
     model = Kronos.from_pretrained(hub_name)
-    _predictor = KronosPredictor(model, tokenizer, device=device)
+    _predictor = KronosPredictor(model, tokenizer, device=device, max_context=max_context)
     print(f"[Kronos] Model ready.")
     return _predictor
 
