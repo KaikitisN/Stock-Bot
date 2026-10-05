@@ -31,7 +31,7 @@ DEFAULT_AI_PROVIDER = "Kronos (Local)"
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
 # Minimum forecast move required before Kronos turns a prediction into BUY/SELL.
-KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "2.5"))
+KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "1.5"))
 
 # --- Trade quality gates ---
 MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "70"))
@@ -56,7 +56,13 @@ DEFAULT_FREQUENCY = "Every 15 minutes"
 DEFAULT_SYMBOLS = [
     "SPY", "QQQ", "AAPL", "NVDA", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NFLX",
     "AMD", "INTC", "MU", "XOM",
-    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "XRP/USD", "PAXG/USD", "BNB/USD", "MKR/USD",
+    # Crypto (Alpaca /USD pairs — stables omitted; BNB unsupported; MKR → SKY)
+    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "XRP/USD", "PAXG/USD",
+    "AAVE/USD", "ADA/USD", "ARB/USD", "AVAX/USD", "BAT/USD", "BCH/USD",
+    "BONK/USD", "CRV/USD", "DOGE/USD", "DOT/USD", "FIL/USD", "GRT/USD",
+    "HYPE/USD", "LDO/USD", "LTC/USD", "ONDO/USD", "PEPE/USD", "POL/USD",
+    "RENDER/USD", "SHIB/USD", "SKY/USD", "SUSHI/USD", "TRUMP/USD",
+    "UNI/USD", "WIF/USD", "XTZ/USD", "YFI/USD",
 ]
 
 # --- Risk limits (all as % of account equity) ---
