@@ -30,13 +30,19 @@ DEFAULT_AI_PROVIDER = "Kronos (Local)"
 # mini (~1 GB, CPU ok) | small (~2 GB) | base (~4 GB) | large (~8 GB GPU)
 KRONOS_MODEL_SIZE = os.getenv("KRONOS_MODEL_SIZE", "mini")
 KRONOS_REPO_PATH = os.getenv("KRONOS_REPO_PATH", "../Kronos")
+# Walk-forward on BTC, ETH, SOL, XRP, DOGE, AVAX, LINK, LTC hourly bars
+# (2026-06-12 to 2026-10-10, last 30 days held out). The setup that stayed
+# profitable out of sample was a 64-hour window, a 12-hour forecast, and a
+# buy only when paths strongly agree. See logs/kronos_search/leaderboard.json.
+KRONOS_LOOKBACK = int(os.getenv("KRONOS_LOOKBACK", "64"))
+KRONOS_PRED_LEN = int(os.getenv("KRONOS_PRED_LEN", "12"))
 # Minimum forecast move required before Kronos turns a prediction into BUY/SELL.
-KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "1.5"))
+KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "0.3"))
 
 # --- Trade quality gates ---
-MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "70"))
+MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "80"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "12"))
-USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "true").lower() == "true"
+USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "false").lower() == "true"
 ALLOW_SHORT_SELLING = os.getenv("ALLOW_SHORT_SELLING", "false").lower() == "true"
 
 # --- News toggle (Perplexity Sonar) ---
@@ -98,7 +104,7 @@ SIZING = {
     "atr_target_multiple": _env_float("ATR_TARGET_MULTIPLE", 4.0),
     # conviction value at which max_position_pct is reached.
     "ir_saturation": _env_float("IR_SATURATION", 1.0),
-    "min_information_ratio": _env_float("MIN_INFORMATION_RATIO", 0.2),
+    "min_information_ratio": _env_float("MIN_INFORMATION_RATIO", 0.8),
 }
 
 # Independent Kronos sample paths drawn per symbol to measure forecast dispersion.

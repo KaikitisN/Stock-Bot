@@ -79,6 +79,7 @@ def test_low_confidence_is_vetoed(monkeypatch):
 
 
 def test_trend_filter_veto_is_recorded(monkeypatch):
+    monkeypatch.setattr(orchestrator.config, "USE_TREND_FILTER", True)
     _patch_decision(monkeypatch, _decision())
     _patch_position_checks(monkeypatch)
     decision, candidate = orchestrator.evaluate_symbol(

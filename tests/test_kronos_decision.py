@@ -85,6 +85,7 @@ def test_one_series_is_submitted_per_requested_path(stub):
     predictor = stub([103.0] * config.KRONOS_SAMPLE_PATHS)
     kronos_decision.get_kronos_decision("TEST", _bars())
     assert predictor.last_call["n_series"] == config.KRONOS_SAMPLE_PATHS
+    assert predictor.last_call["pred_len"] == config.KRONOS_PRED_LEN
 
 
 def test_agreed_bullish_forecast_is_a_confident_buy(stub):
@@ -151,10 +152,11 @@ def test_inference_failure_holds_and_reports(stub, monkeypatch):
 
 
 def test_too_few_bars_holds(stub):
+    import config
     stub([104.0] * 30)
     decision = kronos_decision.get_kronos_decision("TEST", _bars(n=30))
     assert decision["action"] == "HOLD"
-    assert "60 required" in decision["reason"]
+    assert f"{config.KRONOS_LOOKBACK} required" in decision["reason"]
 
 
 def test_stats_fields_are_flat_scalars_for_csv_logging(stub):

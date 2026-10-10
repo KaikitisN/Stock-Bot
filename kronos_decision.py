@@ -133,7 +133,9 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
 
-    input_df = bars_df[["open", "high", "low", "close", "volume"]].tail(200).copy()
+    lookback = int(getattr(config, "KRONOS_LOOKBACK", 64))
+    pred_len = int(getattr(config, "KRONOS_PRED_LEN", 12))
+    input_df = bars_df[["open", "high", "low", "close", "volume"]].tail(lookback).copy()
     x_timestamp = _get_timestamp_series(bars_df.tail(len(input_df)))
 
     if x_timestamp is None:
@@ -144,12 +146,12 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
 
-    y_timestamp = _make_future_timestamps(x_timestamp, pred_len=10)
+    y_timestamp = _make_future_timestamps(x_timestamp, pred_len=pred_len)
 
-    if len(input_df) < 60:
+    if len(input_df) < lookback:
         return {
             "symbol": symbol, "action": "HOLD", "confidence": 0,
-            "reason": f"Not enough bars ({len(input_df)} < 60 required).",
+            "reason": f"Not enough bars ({len(input_df)} < {lookback} required).",
             "provider": "Kronos (Local)",
             "mu_pct": 0.0, "sigma_pct": 0.0, "conviction": 0.0, "p_up": 0.0,
         }
@@ -165,7 +167,7 @@ def get_kronos_decision(symbol: str, bars_df: pd.DataFrame) -> dict:
             df_list=[input_df] * n_paths,
             x_timestamp_list=[x_timestamp] * n_paths,
             y_timestamp_list=[y_timestamp] * n_paths,
-            pred_len=10,
+            pred_len=pred_len,
             T=1.0,
             top_p=0.9,
             sample_count=1,

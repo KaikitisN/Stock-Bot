@@ -29,7 +29,7 @@ def test_sizing_defaults_match_spec():
     assert config.SIZING["atr_stop_multiple"] == 2.0
     assert config.SIZING["atr_target_multiple"] == 4.0
     assert config.SIZING["ir_saturation"] == 1.0
-    assert config.SIZING["min_information_ratio"] == 0.2
+    assert config.SIZING["min_information_ratio"] == 0.8
 
 
 def test_position_band_is_coherent():
