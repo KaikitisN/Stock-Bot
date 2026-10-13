@@ -60,7 +60,7 @@ FREQUENCY_OPTIONS = {
     "Every hour": 60,
     "Once a day": 1440,
 }
-DEFAULT_FREQUENCY = "Every 15 minutes"
+DEFAULT_FREQUENCY = "Every 5 minutes"
 
 # --- Universe (focused liquid watchlist) ---
 DEFAULT_SYMBOLS = [
