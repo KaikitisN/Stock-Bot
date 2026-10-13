@@ -41,12 +41,16 @@ KRONOS_SIGNAL_THRESHOLD_PCT = float(os.getenv("KRONOS_SIGNAL_THRESHOLD_PCT", "0.
 
 # --- Trade quality gates ---
 MIN_TRADE_CONFIDENCE = int(os.getenv("MIN_TRADE_CONFIDENCE", "80"))
+# Names that entered only because of a headline. The forecast still has to
+# agree; this floor is just lower than the watchlist so those trades can fire.
+NEWS_MIN_TRADE_CONFIDENCE = int(os.getenv("NEWS_MIN_TRADE_CONFIDENCE", "70"))
+NEWS_MAX_SYMBOLS = int(os.getenv("NEWS_MAX_SYMBOLS", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "12"))
 USE_TREND_FILTER = os.getenv("USE_TREND_FILTER", "false").lower() == "true"
 ALLOW_SHORT_SELLING = os.getenv("ALLOW_SHORT_SELLING", "false").lower() == "true"
 
-# --- News toggle (Perplexity Sonar) ---
-USE_NEWS_DEFAULT = False
+# --- News (Alpaca). On by default so a cycle can pick symbols from headlines. ---
+USE_NEWS_DEFAULT = True
 
 # --- Trading frequency options (minutes) ---
 FREQUENCY_OPTIONS = {
@@ -107,6 +111,14 @@ SIZING = {
     "min_information_ratio": _env_float("MIN_INFORMATION_RATIO", 0.8),
 }
 
+# Crypto cannot carry a bracket. The sell stop is a stop-limit, and this is how
+# far through the trigger the limit sits so a fast move can still fill.
+CRYPTO_STOP_LIMIT_BUFFER_PCT = _env_float("CRYPTO_STOP_LIMIT_BUFFER_PCT", 1.0)
+
+# News-originated entries use a smaller ceiling than the watchlist. The
+# minimum position size is unchanged, so a weak forecast is still rejected.
+NEWS_POSITION_SCALE = _env_float("NEWS_POSITION_SCALE", 0.5)
+
 # Independent Kronos sample paths drawn per symbol to measure forecast dispersion.
 KRONOS_SAMPLE_PATHS = int(os.getenv("KRONOS_SAMPLE_PATHS", "30"))
 
@@ -122,3 +134,4 @@ LOG_DIR = "logs"
 DECISIONS_LOG = f"{LOG_DIR}/decisions.csv"
 TRADES_LOG = f"{LOG_DIR}/trades.csv"
 DAY_STATE_FILE = f"{LOG_DIR}/day_state.json"
+EXIT_PLANS_FILE = f"{LOG_DIR}/exit_plans.json"

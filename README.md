@@ -84,7 +84,7 @@ Set `KRONOS_MODEL_SIZE=mini` in `.env` to start (CPU-friendly).
 | `config.py` | All defaults: risk %, AI providers, frequency options |
 | `data_fetcher.py` | OHLCV bars + SMA-10, SMA-30, RSI-14 from Alpaca |
 | `kronos_decision.py` | **Local Kronos inference** — price forecast → BUY/SELL/HOLD |
-| `news_fetcher.py` | Optional Perplexity Sonar news summary (toggle in dashboard) |
+| `news_fetcher.py` | Alpaca headlines. New symbols are forecast, then traded at a lower confidence floor and half size |
 | `ai_decision.py` | Routes to Kronos or LiteLLM depending on selected provider |
 | `risk_manager.py` | Position sizing, stop-loss/take-profit as % of account equity |
 | `executor.py` | Bracket orders (entry + SL + TP) via alpaca-py |
@@ -95,7 +95,7 @@ Set `KRONOS_MODEL_SIZE=mini` in `.env` to start (CPU-friendly).
 
 ## Dashboard Features
 - **AI model selector** — Kronos (local), Perplexity Sonar/Pro, GPT-4o/mini, Claude 3.5
-- **News toggle** — adds live Perplexity Sonar news to any provider's decision
+- **News scan** — Alpaca headlines can add up to 5 symbols outside the watchlist. Kronos still has to agree. Those names use a 70 confidence floor and half the normal size cap |
 - **Frequency selector** — 5 min / 15 min / 30 min / hourly / daily
 - **Risk sliders** — max position size, stop-loss, take-profit, max daily loss (% of equity)
 - **Account overview** — live equity, cash, open positions

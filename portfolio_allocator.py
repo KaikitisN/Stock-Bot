@@ -75,6 +75,13 @@ def allocate(
             plans.append(plan)
             continue
 
+        scale = float(candidate.get("position_scale", 1.0) or 1.0)
+        sizing_for = sizing
+        if scale != 1.0:
+            sizing_for = dict(sizing)
+            sizing_for["max_position_pct"] = sizing["max_position_pct"] * scale
+            sizing_for["risk_per_trade_pct"] = sizing["risk_per_trade_pct"] * scale
+
         result = size_position(
             price=candidate["price"],
             equity=equity,
@@ -82,7 +89,7 @@ def allocate(
             atr=candidate.get("atr"),
             conviction=candidate["conviction"],
             remaining_budget=remaining_budget,
-            sizing=sizing,
+            sizing=sizing_for,
         )
         funded = result["qty"] > 0
         plan.update(result, funded=funded)

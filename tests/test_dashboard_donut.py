@@ -91,6 +91,34 @@ def test_total_is_rendered_in_the_centre(holdings):
     assert "$ 4,000.00" in build_donut_svg(holdings, 4000.0)
 
 
+def test_equity_chart_draws_the_line_and_the_time_labels():
+    from dashboard_helpers import build_equity_chart_svg
+
+    svg = build_equity_chart_svg(
+        [(1, 441.0), (2, 465.0), (3, 478.0)],
+        ["3 AM", "11 AM", "2 PM"],
+    )
+    assert "<svg" in svg
+    assert "cc-equity-line" in svg
+    assert "3 AM" in svg
+    assert "2 PM" in svg
+    assert "$478.00" in svg
+
+
+def test_range_change_is_measured_from_the_start_of_the_chart():
+    from dashboard_helpers import range_change
+
+    delta, pct = range_change([(1, 100.0), (2, 110.0)], 112.0)
+    assert delta == 12.0
+    assert pct == 12.0
+
+
+def test_range_change_is_zero_without_history():
+    from dashboard_helpers import range_change
+
+    assert range_change([], 100.0) == (0.0, 0.0)
+
+
 def test_no_plotly_chart_is_used_by_the_dashboard():
     """The 4.5 MB PlotlyChart JS chunk must stay unrequested on page load."""
     with open("dashboard.py", encoding="utf-8") as f:

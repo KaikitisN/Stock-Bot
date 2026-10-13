@@ -9,6 +9,7 @@ from datetime import datetime
 import config
 from data_fetcher import get_market_snapshot
 from ai_decision import get_decision
+from news_fetcher import discover_news_symbols
 from risk_manager import (
     get_account_equity,
     get_portfolio_state,
@@ -23,7 +24,9 @@ from executor import (
     submit_bracket_order,
     get_position_side,
     has_pending_order,
+    protection_error,
 )
+from exits import manage_open_exits
 
 os.makedirs(config.LOG_DIR, exist_ok=True)
 
@@ -86,6 +89,13 @@ def log_decision(row: dict):
         writer.writerow(row)
 
 
+def trade_limits(symbol, news_symbols):
+    """Watchlist names keep the normal floor. News-only names use the lower one."""
+    if symbol in news_symbols:
+        return config.NEWS_MIN_TRADE_CONFIDENCE, config.NEWS_POSITION_SCALE
+    return None, 1.0
+
+
 def evaluate_symbol(
     trading_client,
     symbol,
@@ -95,6 +105,8 @@ def evaluate_symbol(
     *,
     trading_halted=False,
     halt_reason="",
+    min_confidence=None,
+    position_scale=1.0,
 ):
     """Score one symbol and apply every veto. Submits nothing.
 
@@ -106,7 +118,8 @@ def evaluate_symbol(
     decision["trade_submitted"] = False
     decision["error"] = ""
 
-    min_confidence = getattr(config, "MIN_TRADE_CONFIDENCE", 70)
+    if min_confidence is None:
+        min_confidence = getattr(config, "MIN_TRADE_CONFIDENCE", 70)
     action = decision.get("action", "HOLD").upper()
     confidence = decision.get("confidence", 0)
 
@@ -132,7 +145,9 @@ def evaluate_symbol(
     ):
         return veto(f"Skipped: already holding a {current_side} position in {symbol}.")
 
-    if has_pending_order(trading_client, symbol):
+    # A resting sell stop is the protection on a long, not a second entry.
+    # A closing sell must still be allowed; it cancels that stop before it sells.
+    if action == "BUY" and has_pending_order(trading_client, symbol):
         return veto(f"Skipped: an order for {symbol} is already pending.")
 
     if action == "SELL" and current_side is None and not config.ALLOW_SHORT_SELLING:
@@ -151,9 +166,41 @@ def evaluate_symbol(
         "atr": market_data.get("atr_14"),
         "conviction": float(decision.get("conviction", 0.0) or 0.0),
         "closing": closing,
+        "position_scale": position_scale,
         "decision": decision,
     }
     return decision, candidate
+
+
+def protect_open_positions(trading_client, quotes, risk_cfg):
+    """Place missing crypto stops and sell positions that have hit their exit."""
+    actions = manage_open_exits(trading_client, quotes, config.SIZING, risk_cfg)
+    for action in actions:
+        if action.get("action") == "HOLD":
+            continue
+        log_decision({
+            "timestamp": datetime.utcnow().isoformat(),
+            "symbol": action.get("symbol", ""),
+            "action": action.get("action", ""),
+            "confidence": "",
+            "reason": action.get("reason", ""),
+            "provider": "exit",
+            "qty": action.get("qty", ""),
+            "trade_submitted": bool(action.get("submitted")),
+            "error": "" if action.get("submitted") else action.get("reason", ""),
+        })
+        if action.get("action") == "SELL" and action.get("submitted"):
+            log_row(config.TRADES_LOG, {
+                "timestamp": datetime.utcnow().isoformat(),
+                "symbol": action.get("symbol", ""),
+                "side": "SELL",
+                "qty": action.get("qty", ""),
+                "entry_price": action.get("price", ""),
+                "stop_price": action.get("stop_price", ""),
+                "target_price": action.get("target_price", ""),
+                "order_id": action.get("order_id", ""),
+            })
+    return actions
 
 
 def execute_plan(trading_client, plan, risk_cfg, sizing):
@@ -170,7 +217,8 @@ def execute_plan(trading_client, plan, risk_cfg, sizing):
 
     try:
         order = submit_bracket_order(
-            trading_client, symbol, qty, action, stop_price, target_price
+            trading_client, symbol, qty, action, stop_price, target_price,
+            entry_price=price,
         )
         decision["trade_submitted"] = order is not None
         if order is not None:
@@ -187,6 +235,11 @@ def execute_plan(trading_client, plan, risk_cfg, sizing):
                 "target_price": target_price,
                 "order_id": str(order.id),
             })
+            if protection_error():
+                decision["error"] = (
+                    "Entry filled, protective stop was not accepted: "
+                    + protection_error()
+                )
     except Exception as e:
         decision["trade_submitted"] = False
         decision["error"] = str(e)
@@ -205,7 +258,17 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
         risk_cfg.get("max_daily_loss_pct", config.DEFAULT_RISK["max_daily_loss_pct"]),
     )
 
+    news_symbols = []
+    if use_news:
+        news_symbols = [
+            symbol for symbol in discover_news_symbols(symbols, market_open)
+            if symbol not in symbols
+        ]
+
     tradable_symbols = [s for s in symbols if _is_crypto(s) or market_open]
+    for symbol in news_symbols:
+        if symbol not in tradable_symbols and (_is_crypto(symbol) or market_open):
+            tradable_symbols.append(symbol)
     results = []
 
     for symbol in symbols:
@@ -219,13 +282,16 @@ def run_once(symbols, provider_name, use_news, risk_cfg):
         })
 
     snapshot = get_market_snapshot(tradable_symbols)
+    protect_open_positions(trading_client, snapshot, risk_cfg)
 
     # Phase 1: score everything, submit nothing.
     candidates = []
     for symbol, market_data in snapshot.items():
+        floor, scale = trade_limits(symbol, news_symbols)
         decision, candidate = evaluate_symbol(
             trading_client, symbol, market_data, provider_name, use_news,
             trading_halted=halted, halt_reason=halt_reason,
+            min_confidence=floor, position_scale=scale,
         )
         results.append(decision)
         if candidate is not None:

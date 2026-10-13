@@ -305,6 +305,114 @@ html, body, [class*="css"], .stApp, .stMarkdown, .stText {
     background: rgba(248, 113, 113, 0.14);
 }
 
+/* Portfolio chart */
+.cc-portfolio {
+    padding-bottom: 0.85rem;
+}
+
+.cc-equity-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+}
+
+.cc-equity-value {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: var(--cc-ink);
+    font-variant-numeric: tabular-nums;
+}
+
+.cc-equity-pct {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.cc-equity-pct.up, .cc-balance-value.up { color: var(--cc-beat); }
+.cc-equity-pct.down, .cc-balance-value.down { color: var(--cc-miss); }
+
+.cc-asof {
+    margin-top: 0.2rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--cc-muted);
+}
+
+.cc-equity-chart svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.cc-chart-label {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    fill: #a1a1aa;
+}
+
+.cc-balances {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem 2.5rem;
+    margin-top: 0.35rem;
+    padding-top: 0.95rem;
+    border-top: 1px solid var(--cc-border-subtle);
+}
+
+.cc-balance-value {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--cc-ink);
+    font-variant-numeric: tabular-nums;
+    margin-top: 0.2rem;
+}
+
+.cc-news-item {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--cc-border-subtle);
+}
+
+.cc-news-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0.15rem;
+}
+
+.cc-news-symbol {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-weight: 600;
+    color: var(--cc-amber);
+}
+
+.cc-news-meta {
+    margin-top: 0.15rem;
+    font-size: 0.78rem;
+    color: var(--cc-muted);
+}
+
+.cc-news-kicker {
+    margin-top: 0.55rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--cc-muted);
+}
+
+.cc-news-sent {
+    margin: 0.3rem 0 0;
+    color: #d4d4d8;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    max-width: 72ch;
+}
+
+div[data-testid="stSegmentedControl"] {
+    justify-content: flex-end;
+}
+
 /* Streamlit overrides */
 div[data-testid="stMetric"] {
     background: var(--cc-card);

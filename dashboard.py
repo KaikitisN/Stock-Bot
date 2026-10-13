@@ -5,15 +5,31 @@ Run with: streamlit run dashboard.py
 """
 import json
 from datetime import datetime, timezone
+from html import escape, unescape
 
 import pandas as pd
 import streamlit as st
+from alpaca.trading.requests import GetPortfolioHistoryRequest
 
 import config
-from dashboard_helpers import build_donut_svg, portfolio_allocation, positions_table_data
+from dashboard_helpers import (
+    build_donut_svg,
+    build_equity_chart_svg,
+    portfolio_allocation,
+    positions_table_data,
+    range_change,
+)
 from dashboard_theme import inject_theme
 from executor import get_open_positions, get_trading_client
+from news_fetcher import news_scan
 from risk_manager import get_account_summary
+
+PORTFOLIO_RANGES = {
+    "1D": ("1D", "5Min", True),
+    "1M": ("1M", "1D", False),
+    "1Y": ("1A", "1D", False),
+    "All": ("all", "1D", False),
+}
 
 REFRESH_SECONDS = 45
 
@@ -91,10 +107,17 @@ def fetch_account_snapshot() -> dict:
         client = get_trading_client()
         summary = get_account_summary(client)
         positions = [_serialize_position(p) for p in get_open_positions(client)]
+        market_open = False
+        try:
+            market_open = bool(client.get_clock().is_open)
+        except Exception:
+            market_open = False
         return {
             "equity": summary["equity"],
             "cash": summary["cash"],
             "last_equity": summary.get("last_equity", summary["equity"]),
+            "buying_power": summary.get("buying_power", summary["cash"]),
+            "market_open": market_open,
             "positions": positions,
             "error": None,
         }
@@ -103,9 +126,44 @@ def fetch_account_snapshot() -> dict:
             "equity": 0.0,
             "cash": 0.0,
             "last_equity": 0.0,
+            "buying_power": 0.0,
+            "market_open": False,
             "positions": [],
             "error": str(e),
         }
+
+
+@st.cache_data(ttl=REFRESH_SECONDS - 5, show_spinner=False)
+def fetch_portfolio_series(period: str, timeframe: str, extended: bool) -> dict:
+    try:
+        client = get_trading_client()
+        history = client.get_portfolio_history(GetPortfolioHistoryRequest(
+            period=period,
+            timeframe=timeframe,
+            extended_hours=extended,
+        ))
+        points = []
+        for ts, value in zip(history.timestamp or [], history.equity or []):
+            if ts is None or value is None:
+                continue
+            equity_value = float(value)
+            # Alpaca writes 0 on days before the account existed.
+            if equity_value <= 0:
+                continue
+            points.append((int(ts), equity_value))
+        return {"points": points, "error": None}
+    except Exception as e:
+        return {"points": [], "error": str(e)}
+
+
+@st.cache_data(ttl=REFRESH_SECONDS - 5, show_spinner=False)
+def fetch_news_scan(market_open: bool) -> dict:
+    try:
+        return news_scan(
+            tuple(config.DEFAULT_SYMBOLS), market_open, include_closed=True,
+        )
+    except Exception as e:
+        return {"error": str(e), "items": []}
 
 
 def load_runner_status() -> dict | None:
@@ -141,7 +199,168 @@ def render_header(mode_label: str):
     )
 
 
-def render_metric_strip(cash, equity, positions, runner_status, mode_label):
+def _display_tz():
+    tz_name = getattr(config, "DISPLAY_TIMEZONE", "Europe/Athens")
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(tz_name)
+    except Exception:
+        return timezone.utc
+
+
+def _as_of_label() -> str:
+    now = datetime.now(_display_tz())
+    clock = now.strftime("%B %d, %I:%M %p")
+    abbrev = now.tzname() or ""
+    return f"{clock} {abbrev}".strip()
+
+
+def _chart_labels(points) -> list[str]:
+    if not points:
+        return ["", "", ""]
+    stamps = [p[0] for p in points]
+    span = stamps[-1] - stamps[0]
+
+    def fmt(ts):
+        moment = datetime.fromtimestamp(ts, _display_tz())
+        if span <= 36 * 3600:
+            return moment.strftime("%I %p").lstrip("0")
+        return moment.strftime("%d %b")
+
+    mid = stamps[len(stamps) // 2]
+    return [fmt(stamps[0]), fmt(mid), fmt(stamps[-1])]
+
+
+def _news_text(value) -> str:
+    text = unescape(str(value or ""))
+    if len(text) > 420:
+        return text[:417].rstrip() + "…"
+    return text
+
+
+def _signed_money(value: float) -> str:
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}${abs(value):,.2f}"
+
+
+def render_portfolio(equity, cash, buying_power, last_equity):
+    title_col, range_col = st.columns([2.4, 1])
+    with title_col:
+        st.markdown(
+            '<div class="cc-section" style="margin-top:0">'
+            '<div class="cc-section-title">Your portfolio</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with range_col:
+        if "portfolio_span" not in st.session_state:
+            st.session_state.portfolio_span = "1D"
+        selected = st.segmented_control(
+            "Range",
+            list(PORTFOLIO_RANGES),
+            key="portfolio_span",
+            label_visibility="collapsed",
+        )
+    selected = selected or "1D"
+    period, timeframe, extended = PORTFOLIO_RANGES[selected]
+    series = fetch_portfolio_series(period, timeframe, extended)
+    points = series["points"]
+    if selected == "1D" and last_equity:
+        pct = (equity - last_equity) / last_equity * 100.0
+    else:
+        _, pct = range_change(points, equity)
+
+    pct_class = "up" if pct >= 0 else "down"
+    daily = equity - (last_equity or equity)
+    daily_class = "up" if daily >= 0 else "down"
+    chart = build_equity_chart_svg(points, _chart_labels(points))
+    if series["error"]:
+        chart = (
+            '<div class="cc-empty">Chart unavailable: '
+            f"{escape(series['error'])}</div>"
+        )
+
+    st.markdown(
+        '<div class="cc-card cc-portfolio">'
+        '<div class="cc-equity-row">'
+        f'<span class="cc-equity-value">${equity:,.2f}</span>'
+        f'<span class="cc-equity-pct {pct_class}">{pct:+.2f}%</span>'
+        "</div>"
+        f'<div class="cc-asof">{escape(_as_of_label())}</div>'
+        f"{chart}"
+        '<div class="cc-balances">'
+        "<div>"
+        '<div class="cc-metric-label">Buying Power</div>'
+        f'<div class="cc-balance-value">${buying_power:,.2f}</div>'
+        "</div><div>"
+        '<div class="cc-metric-label">Cash</div>'
+        f'<div class="cc-balance-value">${cash:,.2f}</div>'
+        "</div><div>"
+        '<div class="cc-metric-label">Daily Change</div>'
+        f'<div class="cc-balance-value {daily_class}">{_signed_money(daily)}</div>'
+        "</div></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_news(market_open: bool):
+    st.markdown(
+        '<div class="cc-section">'
+        '<div class="cc-section-title">News scan</div>'
+        '<div class="cc-section-sub">Headlines that added a symbol, and the text sent with its forecast</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    scan = fetch_news_scan(market_open)
+    st.markdown('<div class="cc-card">', unsafe_allow_html=True)
+    if scan.get("error"):
+        st.markdown(
+            f'<div class="cc-empty">News scan failed: {escape(scan["error"])}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    if not market_open:
+        st.caption(
+            "The stock market is closed. Stock names were gathered and are sent when it opens. Crypto is sent now."
+        )
+
+    items = scan.get("items") or []
+    if not items:
+        st.markdown(
+            '<div class="cc-empty">No new names in the latest headlines. '
+            "The watchlist is still forecast on its own.</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    body = ""
+    for item in items:
+        scale = float(item.get("position_scale") or 1)
+        body += (
+            '<div class="cc-news-item">'
+            f'<div class="cc-news-symbol">{escape(str(item.get("symbol", "")))}</div>'
+            '<div class="cc-news-meta">'
+            f'Confidence floor {int(item.get("confidence_floor") or 0)}'
+            f" · size cap ×{scale:g}"
+            "</div>"
+            '<div class="cc-news-kicker">'
+            + (
+                "Gathered. Not sent yet, because the stock market is closed."
+                if item.get("status") == "waiting"
+                else "Sent to the model"
+            )
+            + "</div>"
+            f'<p class="cc-news-sent">{escape(_news_text(item.get("sent", "")))}</p>'
+            "</div>"
+        )
+    st.markdown(body, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_metric_strip(positions, runner_status, mode_label):
     state = (runner_status or {}).get("state", "unknown")
     state_label = {
         "running": "Running",
@@ -150,10 +369,8 @@ def render_metric_strip(cash, equity, positions, runner_status, mode_label):
     }.get(state, "Unknown")
     state_class = state if state in ("running", "idle", "error") else "unknown"
 
-    cols = st.columns(5)
+    cols = st.columns(3)
     cells = [
-        ("Cash", f"$ {cash:,.2f}", "cash"),
-        ("Equity", f"$ {equity:,.2f}", ""),
         ("Open Positions", str(len(positions)), ""),
         ("Runner", state_label, state_class),
         ("Mode", mode_label, ""),
@@ -445,7 +662,14 @@ def render_live():
     if error:
         st.error(f"Could not connect to Alpaca. Check your API keys in .env. ({error})")
 
-    render_metric_strip(cash, equity, positions, runner_status, mode_label)
+    render_portfolio(
+        equity,
+        cash,
+        snapshot.get("buying_power", cash),
+        snapshot.get("last_equity", equity),
+    )
+    render_news(bool(snapshot.get("market_open")))
+    render_metric_strip(positions, runner_status, mode_label)
     render_holdings(positions, equity, cash)
     render_top_positions(positions, equity)
     render_runner(runner_status)

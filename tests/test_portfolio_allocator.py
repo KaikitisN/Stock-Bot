@@ -141,3 +141,12 @@ def test_rejected_candidates_are_returned_not_dropped():
 
 def test_empty_candidate_list_returns_empty_plan():
     assert _allocate([]) == []
+
+
+def test_news_position_scale_cuts_the_size_cap():
+    full = _allocate([_candidate("FULL", 1.0)])[0]
+    scaled = _candidate("NEWS", 1.0)
+    scaled["position_scale"] = 0.5
+    news = _allocate([scaled])[0]
+    assert full["funded"] and news["funded"]
+    assert news["dollars"] == pytest.approx(full["dollars"] * 0.5)

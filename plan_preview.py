@@ -7,7 +7,8 @@ Run before trusting a sizing change with real orders:
 import config
 from data_fetcher import get_market_snapshot
 from executor import get_trading_client
-from orchestrator import evaluate_symbol, is_stock_market_open
+from news_fetcher import discover_news_symbols
+from orchestrator import evaluate_symbol, is_stock_market_open, trade_limits
 from portfolio_allocator import allocate, exposure_budget
 from risk_manager import count_open_positions, get_portfolio_state, stop_target_for
 
@@ -35,14 +36,28 @@ def main():
     print(f"Positions   {open_positions} open / {config.MAX_OPEN_POSITIONS} max")
     print(f"Market      {'open' if market_open else 'closed'}\n")
 
-    symbols = [s for s in config.DEFAULT_SYMBOLS if "/" in s or market_open]
+    watchlist = list(config.DEFAULT_SYMBOLS)
+    news_symbols = []
+    if config.USE_NEWS_DEFAULT:
+        news_symbols = [
+            symbol for symbol in discover_news_symbols(watchlist, market_open)
+            if symbol not in watchlist
+        ]
+        print(f"News names  {', '.join(news_symbols) or 'none'}\n")
+
+    symbols = [s for s in watchlist if "/" in s or market_open]
+    for symbol in news_symbols:
+        if symbol not in symbols and ("/" in symbol or market_open):
+            symbols.append(symbol)
     snapshot = get_market_snapshot(symbols)
 
     candidates = []
     print(f"{'SYMBOL':<10} {'ACTION':<7} {'CONF':>5} {'MU%':>8} {'SIGMA%':>8} {'CONV':>6}  NOTE")
     for symbol, market_data in snapshot.items():
+        floor, scale = trade_limits(symbol, news_symbols)
         decision, candidate = evaluate_symbol(
-            trading_client, symbol, market_data, config.DEFAULT_AI_PROVIDER, False,
+            trading_client, symbol, market_data, config.DEFAULT_AI_PROVIDER,
+            config.USE_NEWS_DEFAULT, min_confidence=floor, position_scale=scale,
         )
         print(
             f"{symbol:<10} {decision.get('action', ''):<7} "

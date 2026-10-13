@@ -271,6 +271,100 @@ def positions_table_data(positions, equity: float) -> list[dict]:
     return rows
 
 
+def range_change(points, current_equity: float) -> tuple[float, float]:
+    """Dollar and percent change from the first chart point to current equity."""
+    if not points:
+        return 0.0, 0.0
+    start = float(points[0][1])
+    if start == 0:
+        return 0.0, 0.0
+    delta = float(current_equity) - start
+    return delta, delta / start * 100.0
+
+
+def _axis_money(value: float) -> str:
+    if value == 0 or abs(value) >= 1:
+        return f"${value:,.2f}"
+    return f"${value:.4f}"
+
+
+def build_equity_chart_svg(points, x_labels) -> str:
+    """Gold area chart. points are (timestamp, equity). x_labels are start, mid, end."""
+    if len(points) < 2:
+        return '<div class="cc-empty">Not enough history for this range yet.</div>'
+
+    values = [float(v) for _, v in points]
+    data_lo, data_hi = min(values), max(values)
+    span = data_hi - data_lo or max(abs(data_hi) * 0.02, 1.0)
+    lo = data_lo - span * 0.12
+    hi = data_hi + span * 0.12
+
+    width, height = 640, 176
+    left, right, top, bottom = 8, 78, 10, 28
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+
+    def xy(index, value):
+        x = left + plot_w * (index / (len(points) - 1))
+        y = top + plot_h * (1 - (value - lo) / (hi - lo))
+        return x, y
+
+    coords = [xy(i, value) for i, value in enumerate(values)]
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    base = top + plot_h
+    area = f"{coords[0][0]:.1f},{base:.1f} {line} {coords[-1][0]:.1f},{base:.1f}"
+
+    grid = ""
+    for fraction in (0.25, 0.5, 0.75):
+        y = top + plot_h * (1 - fraction)
+        grid += (
+            f'<line x1="{left}" y1="{y:.1f}" x2="{left + plot_w}" y2="{y:.1f}" '
+            f'stroke="rgba(255,255,255,0.06)" stroke-width="1"/>'
+        )
+
+    y_labels = (
+        (data_hi, xy(0, data_hi)[1]),
+        ((data_lo + data_hi) / 2, xy(0, (data_lo + data_hi) / 2)[1]),
+        (data_lo, xy(0, data_lo)[1]),
+    )
+    y_text = ""
+    for value, y in y_labels:
+        y_text += (
+            f'<text x="{width - 6}" y="{y + 4:.1f}" text-anchor="end" '
+            f'class="cc-chart-label">{escape(_axis_money(value))}</text>'
+        )
+
+    x_text = ""
+    anchors = (
+        (left, "start", x_labels[0] if len(x_labels) > 0 else ""),
+        (left + plot_w / 2, "middle", x_labels[1] if len(x_labels) > 1 else ""),
+        (left + plot_w, "end", x_labels[2] if len(x_labels) > 2 else ""),
+    )
+    for x, anchor, label in anchors:
+        x_text += (
+            f'<text x="{x:.1f}" y="{height - 6}" text-anchor="{anchor}" '
+            f'class="cc-chart-label">{escape(str(label))}</text>'
+        )
+
+    return (
+        '<div class="cc-equity-chart">'
+        f'<svg viewBox="0 0 {width} {height}" role="img" '
+        'aria-label="Portfolio value over the selected range">'
+        "<defs>"
+        '<linearGradient id="ccEquityFill" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="#f59e0b" stop-opacity="0.38"/>'
+        '<stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>'
+        "</linearGradient></defs>"
+        f"{grid}"
+        f'<polygon points="{area}" fill="url(#ccEquityFill)"/>'
+        f'<polyline class="cc-equity-line" points="{line}" fill="none" '
+        'stroke="#f59e0b" stroke-width="2.25" stroke-linejoin="round" '
+        'stroke-linecap="round"/>'
+        f"{y_text}{x_text}"
+        "</svg></div>"
+    )
+
+
 def build_allocation_ring(segments: list[dict]) -> go.Figure:
     """Circular allocation graphic for the positions widget."""
     labels = [s["label"] for s in segments] or ["—"]

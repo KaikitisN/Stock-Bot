@@ -21,6 +21,7 @@ def get_account_summary(trading_client) -> dict:
         "equity": float(account.equity),
         "cash": float(account.cash),
         "last_equity": float(getattr(account, "last_equity", account.equity)),
+        "buying_power": float(getattr(account, "buying_power", account.cash) or 0),
     }
 
 

@@ -13,11 +13,14 @@ from datetime import datetime, timedelta, timezone
 import config
 from data_fetcher import get_market_snapshot
 from executor import get_trading_client
+from news_fetcher import discover_news_symbols
 from orchestrator import (
     execute_plan,
     evaluate_symbol,
     is_stock_market_open,
     log_decision,
+    protect_open_positions,
+    trade_limits,
 )
 from portfolio_allocator import allocate, exposure_budget
 from risk_manager import (
@@ -147,7 +150,18 @@ def job() -> bool:
         )
         market_open = is_stock_market_open(trading_client)
 
+        news_symbols = []
+        if USE_NEWS:
+            news_symbols = [
+                symbol for symbol in discover_news_symbols(symbols, market_open)
+                if symbol not in symbols
+            ]
+            logger.info(f"News symbols this cycle: {news_symbols or 'none'}")
+
         tradable = [s for s in symbols if "/" in s or market_open]
+        for symbol in news_symbols:
+            if symbol not in tradable and ("/" in symbol or market_open):
+                tradable.append(symbol)
         skipped = [s for s in symbols if s not in tradable]
 
         results = []
@@ -167,6 +181,7 @@ def job() -> bool:
 
         if halted:
             logger.warning(halt_reason)
+            protect_open_positions(trading_client, {}, RISK_CFG)
             for i, symbol in enumerate(tradable, start=1):
                 write_status({
                     **_base_running_status(total, started_at),
@@ -200,6 +215,7 @@ def job() -> bool:
                 "progress_pct": 0,
             })
             snapshot = get_market_snapshot(tradable)
+            protect_open_positions(trading_client, snapshot, RISK_CFG)
             snapshot_items = list(snapshot.items())
             work_total = max(len(snapshot_items), 1)
 
@@ -216,6 +232,7 @@ def job() -> bool:
                 })
                 logger.info(f"Analyzing {symbol} ({i}/{len(snapshot_items)})...")
 
+                floor, scale = trade_limits(symbol, news_symbols)
                 decision, candidate = evaluate_symbol(
                     trading_client,
                     symbol,
@@ -224,6 +241,8 @@ def job() -> bool:
                     USE_NEWS,
                     trading_halted=halted,
                     halt_reason=halt_reason,
+                    min_confidence=floor,
+                    position_scale=scale,
                 )
                 results.append(decision)
                 if candidate is not None:
